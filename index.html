@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>輕量化手勢滑動控制</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+            /* 讓頁面很長，方便測試滾動 */
+            height: 200vh;
+            background: linear-gradient(to bottom, #f0f0f0, #a0a0ff);
+        }
+
+        /* 視訊預覽區塊 (除錯用，實際使用可縮小或隱藏) */
+        #webcam-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 240px;
+            height: 180px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* 鏡像翻轉，讓操作更直覺 */
+            transform: scaleX(-1); 
+        }
+
+        #status {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        button {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            font-size: 18px;
+            cursor: pointer;
+            z-index: 2000;
+        }
+        
+        /* 視覺化滑動提示 */
+        #feedback {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 100px;
+            color: rgba(0,0,0,0.5);
+            pointer-events: none;
+            display: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+
+    <button id="startBtn">啟動手勢控制</button>
+    <div id="feedback"></div>
+
+    <div id="webcam-container">
+        <video id="webcam" autoplay playsinline></video>
+        <div id="status">Loading model...</div>
+    </div>
+
+    <!-- 引入 MediaPipe Tasks Vision (CDN) -->
+    <script type="module">
+        import {
+            FilesetResolver,
+            HandLandmarker
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
+
+        const video = document.getElementById("webcam");
+        const statusDiv = document.getElementById("status");
+        const startBtn = document.getElementById("startBtn");
+        const feedback = document.getElementById("feedback");
+
+        let handLandmarker = undefined;
+        let lastVideoTime = -1;
+        let lastX = null;
+        let lastY = null;
+        
+        // 設定靈敏度與冷卻時間
+        const SWIPE_THRESHOLD = 0.05; // 螢幕佔比 (0.05 = 移動 5% 畫面寬度)
+        const COOLDOWN_MS = 500; // 兩次滑動間的冷卻時間
+        let lastSwipeTime = 0;
+
+        // 1. 初始化模型
+        async function createHandLandmarker() {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+            );
+            
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                    delegate: "GPU" // 嘗試使用 GPU 加速
+                },
+                runningMode: "VIDEO",
+                numHands: 1 // 只追蹤一隻手，最省效能
+            });
+            statusDiv.innerText = "Model Ready";
+            startBtn.disabled = false;
+        }
+
+        createHandLandmarker();
+
+        // 2. 啟動鏡頭
+        startBtn.addEventListener("click", async () => {
+            if (!handLandmarker) {
+                alert("模型尚未載入完成");
+                return;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 } // 降低解析度以提升效能
+                });
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", predictWebcam);
+                startBtn.style.display = "none";
+            } catch (err) {
+                console.error(err);
+                alert("無法存取鏡頭");
+            }
+        });
+
+        // 3. 偵測與邏輯循環
+        async function predictWebcam() {
+            let startTimeMs = performance.now();
+
+            if (lastVideoTime !== video.currentTime) {
+                lastVideoTime = video.currentTime;
+                
+                // 執行偵測
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+
+                if (results.landmarks.length > 0) {
+                    // 取得食指指尖座標 (Index 8)
+                    // 座標範圍是 0.0 ~ 1.0
+                    const landmarks = results.landmarks[0];
+                    const x = landmarks[8].x; 
+                    const y = landmarks[8].y;
+
+                    handleGesture(x, y);
+                } else {
+                    // 如果手移開，重置起始點
+                    lastX = null;
+                    lastY = null;
+                    statusDiv.innerText = "No Hand";
+                }
+            }
+
+            window.requestAnimationFrame(predictWebcam);
+        }
+
+        // 4. 手勢邏輯判定
+        function handleGesture(x, y) {
+            const now = Date.now();
+            if (now - lastSwipeTime < COOLDOWN_MS) return; // 冷卻中
+
+            // 第一次偵測到手，先記錄位置
+            if (lastX === null || lastY === null) {
+                lastX = x;
+                lastY = y;
+                return;
+            }
+
+            // 因為鏡頭有做 CSS 鏡像 (scaleX(-1))，但 MediaPipe 的 x 座標是原始影像的
+            // MediaPipe: 0(左) -> 1(右)
+            // 視覺上: 我們手往右揮，原始影像其實是往左動 (如果沒鏡像)
+            // 這裡直接算差值，之後根據實際體感調整方向
+            const dx = x - lastX;
+            const dy = y - lastY;
+
+            // 判斷是否超過閾值
+            if (Math.abs(dx) > SWIPE_THRESHOLD) {
+                if (dx > 0) triggerSwipe("Left");  // 數值變大(往右)，對應鏡像後的「往左」
+                else triggerSwipe("Right");        // 數值變小(往左)，對應鏡像後的「往右」
+                
+                // 重置以防連續觸發
+                lastX = x; 
+                lastY = y; 
+                lastSwipeTime = now;
+            } else if (Math.abs(dy) > SWIPE_THRESHOLD) {
+                if (dy > 0) triggerSwipe("Down");
+                else triggerSwipe("Up");
+                
+                lastX = x; 
+                lastY = y;
+                lastSwipeTime = now;
+            }
+            
+            // 重要：持續更新 lastX/Y 讓它變成「相對移動」偵測
+            // 如果不更新，就會變成「相對於進入畫面那一點」的偵測
+            // 這裡我們選擇：只有沒觸發時才慢慢跟隨，或者可以設計成不跟隨
+            // 簡單作法：每幀都更新上一幀位置，這樣只能偵測「快速揮動」
+            // 這裡採用：不更新，直到觸發或手消失（類似拖曳），或者採用緩慢跟隨
+            // 為了「揮動(Swipe)」感，我們每隔一小段時間更新基準點會比較自然，
+            // 但最簡單的 Swipe 邏輯其實是：
+            // 比較 Current 與 5幀前的 Position。
+            
+            // *修正邏輯*：為了最簡單的 Swipe，我們直接每幀更新，但累積 Delta 其實比較準
+            // 上面的程式碼是基於「累積」概念。若要更順暢，建議每幀更新 lastX/Y，但要速度夠快才觸發
+            // 這裡為了範例簡單，我們採取「不重置 lastX/Y 除非觸發」的策略（類似虛擬搖桿）。
+        }
+
+        function triggerSwipe(direction) {
+            statusDiv.innerText = `Swipe: ${direction}`;
+            showFeedback(direction);
+
+            // 實際觸發網頁行為
+            switch (direction) {
+                case "Up":
+                    window.scrollBy({ top: 300, behavior: 'smooth' });
+                    break;
+                case "Down":
+                    window.scrollBy({ top: -300, behavior: 'smooth' });
+                    break;
+                case "Left":
+                    console.log("觸發上一頁或左滑邏輯");
+                    break;
+                case "Right":
+                    console.log("觸發下一頁或右滑邏輯");
+                    break;
+            }
+        }
+
+        function showFeedback(text) {
+            feedback.innerText = text;
+            feedback.style.display = "block";
+            setTimeout(() => {
+                feedback.style.display = "none";
+            }, 500);
+        }
+    </script>
+</body>
+</html>
