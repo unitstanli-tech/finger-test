@@ -3,168 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>手勢點餐系統</title>
+    <title>穩定版手勢點餐</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: #f4f7f6;
+            background-color: #f0f2f5;
             display: flex;
             flex-direction: column;
             align-items: center;
+            height: 100vh;
+            overflow: hidden; /* 防止滾動，全靠手勢 */
         }
 
-        h1 { color: #333; }
-
-        /* 隱藏視訊源，但必須存在於 DOM 中才能進行偵測 */
+        /* 隱藏視訊源 */
         #webcam-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            opacity: 0; /* 透明度設為 0，視覺上看不見，但程式仍能讀取 */
-            pointer-events: none; /* 讓滑鼠可以穿透 */
-            z-index: -1;
+            position: fixed; opacity: 0; pointer-events: none; z-index: -1;
         }
 
-        /* 狀態列 */
+        /* 狀態指示器 */
         #status-bar {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            position: fixed; top: 10px; right: 10px;
+            background: rgba(0,0,0,0.8); color: white;
+            padding: 8px 15px; border-radius: 20px; font-size: 14px;
+            display: flex; align-items: center; gap: 10px; z-index: 100;
+        }
+        .dot { width: 10px; height: 10px; background: red; border-radius: 50%; }
+        .dot.active { background: #00ff00; }
+        .pinch-indicator {
+            width: 0%; height: 4px; background: #ffff00;
+            transition: width 0.1s linear; border-radius: 2px;
         }
 
-        .dot {
-            width: 10px;
-            height: 10px;
-            background-color: red;
-            border-radius: 50%;
-            transition: background-color 0.3s;
+        /* 菜單區域 */
+        .content-area {
+            flex: 1; width: 100%; max-width: 800px;
+            overflow-y: auto; padding-bottom: 100px;
         }
-        .dot.active { background-color: #00ff00; }
 
-        /* 菜單網格 */
         .menu-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr); /* 3欄 */
-            gap: 20px;
-            max-width: 800px;
-            width: 100%;
-            margin-top: 20px;
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;
+            padding: 10px;
         }
 
         .menu-item {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: all 0.3s ease;
-            border: 3px solid transparent;
-            position: relative;
+            background: white; border-radius: 12px; padding: 15px;
+            text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border: 3px solid transparent; transition: all 0.2s;
         }
 
-        .menu-item img {
-            width: 100px;
-            height: 100px;
-            object-fit: contain;
-            margin-bottom: 10px;
-        }
-
-        .menu-item h3 { margin: 10px 0 5px; }
-        .menu-item p { color: #888; margin: 0; }
-
-        /* 當被手勢選中時的樣式 */
         .menu-item.selected {
-            border-color: #007bff;
-            transform: scale(1.05);
-            box-shadow: 0 10px 20px rgba(0,123,255,0.3);
+            border-color: #007bff; transform: scale(1.05);
+            box-shadow: 0 8px 15px rgba(0,123,255,0.2);
+        }
+        
+        /* 結帳按鈕 (作為最後一個導航項目) */
+        #checkout-btn {
+            margin: 20px auto; padding: 20px; width: 90%;
+            background: #28a745; color: white; text-align: center;
+            border-radius: 12px; font-size: 20px; font-weight: bold;
+            border: 4px solid transparent; opacity: 0.8;
+        }
+        #checkout-btn.selected {
+            border-color: #fff; box-shadow: 0 0 0 4px #28a745, 0 10px 20px rgba(0,0,0,0.2);
+            opacity: 1; transform: scale(1.02);
         }
 
-        /* 購物車提示 */
+        /* 彈窗 Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); display: none;
+            justify-content: center; align-items: center; z-index: 2000;
+        }
+        .modal-box {
+            background: white; padding: 30px; border-radius: 15px;
+            text-align: center; width: 300px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+        }
+        .modal-buttons {
+            margin-top: 20px; display: flex; justify-content: space-around;
+        }
+        .btn { padding: 10px 20px; border-radius: 8px; border: none; font-size: 16px; }
+        .btn-confirm { background: #007bff; color: white; }
+        .btn-cancel { background: #e9ecef; color: #333; }
+        
+        /* 當前 Modal 選項樣式 */
+        .btn.selected { box-shadow: 0 0 0 3px #ffc107; transform: scale(1.1); }
+
+        /* 購物車小提示 */
         #cart-feedback {
-            position: fixed;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: #28a745;
-            color: white;
-            padding: 15px 30px;
-            border-radius: 50px;
-            font-size: 18px;
-            font-weight: bold;
-            opacity: 0;
-            transition: opacity 0.3s;
-            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
-        }
-
-        /* 載入遮罩 */
-        #loading-overlay {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255,255,255,0.9);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-            z-index: 2000;
-        }
-        button {
-            padding: 15px 30px;
-            font-size: 18px;
-            cursor: pointer;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-
-        /* 提示卡 */
-        .instruction {
-            margin-bottom: 20px;
-            padding: 10px;
-            background: #e9ecef;
-            border-radius: 8px;
-            color: #555;
-            font-size: 14px;
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #333; color: white; padding: 10px 20px;
+            border-radius: 30px; opacity: 0; transition: opacity 0.3s;
         }
     </style>
 </head>
 <body>
 
-    <div id="loading-overlay">
-        <h2>正在下載 AI 模型...</h2>
-        <button id="startBtn" disabled>啟動點餐系統</button>
-    </div>
-
-    <h1>🍔 隔空手勢點餐</h1>
-    
-    <div class="instruction">
-        👋 <b>揮動手掌</b>：上下左右切換選擇 &nbsp;|&nbsp; 👌 <b>拇指食指捏合</b>：確認點餐
-    </div>
-
     <div id="status-bar">
         <div class="dot" id="status-dot"></div>
-        <span id="status-text">系統待命</span>
+        <span>手勢待命</span>
+        <div style="width: 50px; background: #555; height: 4px; border-radius: 2px;">
+            <div class="pinch-indicator" id="pinch-bar"></div>
+        </div>
     </div>
 
-    <div class="menu-grid" id="menu">
-        <!-- 菜單項目由 JS 產生 -->
+    <h1>🤏 穩定版手勢點餐</h1>
+
+    <div class="content-area">
+        <div class="menu-grid" id="menu">
+            <!-- JS 生成菜單 -->
+        </div>
+        
+        <!-- 這是導航的最後一個項目 -->
+        <div id="checkout-btn">
+            🛒 下單結帳
+        </div>
     </div>
 
-    <div id="cart-feedback">已加入購物車！</div>
+    <div id="cart-feedback">已加入</div>
 
-    <!-- 隱藏的 Webcam -->
+    <!-- 確認送單彈窗 -->
+    <div class="modal-overlay" id="confirm-modal">
+        <div class="modal-box">
+            <h2>確認送出訂單？</h2>
+            <p>送出後廚房將開始製作</p>
+            <div class="modal-buttons">
+                <!-- 這兩個按鈕也是導航節點 -->
+                <button class="btn btn-cancel" id="modal-cancel">取消</button>
+                <button class="btn btn-confirm" id="modal-confirm">確認送單</button>
+            </div>
+        </div>
+    </div>
+
     <div id="webcam-container">
         <video id="webcam" autoplay playsinline></video>
     </div>
@@ -172,62 +144,54 @@
     <script type="module">
         import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
-        // --- 1. 菜單資料設定 ---
-        const menuItems = [
-            { name: "經典漢堡", price: "$120", icon: "🍔" },
-            { name: "大份薯條", price: "$55", icon: "🍟" },
-            { name: "冰可樂", price: "$30", icon: "🥤" },
-            { name: "炸雞塊", price: "$80", icon: "🍗" },
-            { name: "熱狗堡", price: "$70", icon: "🌭" },
-            { name: "冰淇淋", price: "$40", icon: "🍦" },
-            { name: "生菜沙拉", price: "$60", icon: "🥗" },
-            { name: "黑咖啡", price: "$50", icon: "☕" },
-            { name: "披薩切片", price: "$90", icon: "🍕" }
+        // --- 設定參數 (調校手感的核心) ---
+        // 1. 滑動靈敏度：數字越大越難觸發（越不容易誤觸）
+        const SWIPE_THRESHOLD = 0.08; 
+        // 2. 冷卻時間：滑動一次後，幾毫秒內不能再次滑動 (防止連續跳格)
+        const COOLDOWN_MS = 800; 
+        // 3. 捏合觸發距離
+        const PINCH_DISTANCE = 0.06;
+        // 4. 捏合需要維持的時間 (毫秒)，防誤觸關鍵
+        const PINCH_HOLD_TIME = 600; 
+        // 5. 平滑係數 (0.0 ~ 1.0)：越小越平滑但越有延遲感，建議 0.2-0.3
+        const SMOOTHING_FACTOR = 0.2; 
+
+        // --- 狀態變數 ---
+        let selectedIndex = 0; // 0 ~ (menuItems.length) -> 最後一個是 checkout
+        let isInModal = false; // 是否在彈窗模式
+        let modalIndex = 1;    // 0: Cancel, 1: Confirm (預設選確認)
+        
+        let lastActionTime = 0;
+        let pinchStartTime = 0;
+        
+        // 平滑化座標用
+        let smoothX = null;
+        let smoothY = null;
+        let refX = null; // 動作基準點
+        let refY = null;
+
+        // UI 元素
+        const menuItemsData = [
+            { name: "漢堡", icon: "🍔" }, { name: "薯條", icon: "🍟" }, { name: "可樂", icon: "🥤" },
+            { name: "炸雞", icon: "🍗" }, { name: "熱狗", icon: "🌭" }, { name: "咖啡", icon: "☕" }
         ];
-
-        let selectedIndex = 0; // 當前選中的索引
-        const COLUMNS = 3;     // 網格列數 (對應 CSS grid-template-columns)
-
-        // 產生 HTML
+        const COLUMNS = 3;
+        const CHECKOUT_INDEX = menuItemsData.length; // 結帳按鈕的索引
+        
+        // 生成 UI
         const menuContainer = document.getElementById('menu');
-        menuItems.forEach((item, index) => {
+        menuItemsData.forEach((item, index) => {
             const div = document.createElement('div');
-            div.className = `menu-item ${index === 0 ? 'selected' : ''}`; // 預設選中第一個
+            div.className = `menu-item ${index === 0 ? 'selected' : ''}`;
             div.id = `item-${index}`;
-            div.innerHTML = `
-                <div style="font-size: 50px;">${item.icon}</div>
-                <h3>${item.name}</h3>
-                <p>${item.price}</p>
-            `;
+            div.innerHTML = `<h3>${item.icon}</h3><p>${item.name}</p>`;
             menuContainer.appendChild(div);
         });
 
-        // --- 2. 變數與設定 ---
-        const video = document.getElementById("webcam");
-        const statusText = document.getElementById("status-text");
-        const statusDot = document.getElementById("status-dot");
-        const startBtn = document.getElementById("startBtn");
-        const loadingOverlay = document.getElementById("loading-overlay");
-        const cartFeedback = document.getElementById("cart-feedback");
-
+        // 啟動 MediaPipe
         let handLandmarker = undefined;
-        let lastVideoTime = -1;
-        let lastX = null;
-        let lastY = null;
-        
-        // 參數調整
-        const SWIPE_THRESHOLD = 0.04; // 滑動觸發門檻
-        const COOLDOWN_MS = 600;      // 滑動冷卻時間
-        const PINCH_THRESHOLD = 0.05; // 捏合觸發距離 (0.05 以下算捏合)
-        
-        let lastActionTime = 0;
-        let isPinching = false; // 避免捏合時連續觸發
-
-        // --- 3. 初始化 MediaPipe ---
-        async function createHandLandmarker() {
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-            );
+        async function startApp() {
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
             handLandmarker = await HandLandmarker.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
@@ -236,144 +200,230 @@
                 runningMode: "VIDEO",
                 numHands: 1
             });
-            startBtn.textContent = "開始使用";
-            startBtn.disabled = false;
-        }
-        createHandLandmarker();
 
-        // --- 4. 啟動邏輯 ---
-        startBtn.addEventListener("click", async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                const video = document.getElementById("webcam");
                 video.srcObject = stream;
-                video.addEventListener("loadeddata", predictWebcam);
-                loadingOverlay.style.display = "none";
-                statusDot.classList.add("active");
-                statusText.innerText = "偵測中...";
-            } catch (err) {
-                alert("無法開啟鏡頭");
-            }
-        });
+                video.addEventListener("loadeddata", () => {
+                    document.getElementById("status-dot").classList.add("active");
+                    predictWebcam();
+                });
+            } catch (err) { alert("請允許攝影機權限"); }
+        }
+        startApp();
 
-        // --- 5. 核心偵測循環 ---
+        // 核心偵測 Loop
         async function predictWebcam() {
+            const video = document.getElementById("webcam");
             let startTimeMs = performance.now();
-            if (lastVideoTime !== video.currentTime) {
-                lastVideoTime = video.currentTime;
+
+            if (handLandmarker && video.currentTime > 0) {
                 const results = handLandmarker.detectForVideo(video, startTimeMs);
 
                 if (results.landmarks.length > 0) {
-                    const landmarks = results.landmarks[0];
-                    
-                    // A. 處理滑動 (使用食指指尖 Index 8)
-                    handleSwipe(landmarks[8].x, landmarks[8].y);
+                    const lm = results.landmarks[0];
+                    const rawX = lm[8].x; // 食指 X
+                    const rawY = lm[8].y; // 食指 Y
+                    const thumb = lm[4];  // 拇指
 
-                    // B. 處理捏合 (食指 8 與 拇指 4 的距離)
-                    handlePinch(landmarks[8], landmarks[4]);
+                    // 1. 座標平滑化 (Low Pass Filter) - 解決手抖問題
+                    if (smoothX === null) { smoothX = rawX; smoothY = rawY; }
+                    else {
+                        smoothX = smoothX * (1 - SMOOTHING_FACTOR) + rawX * SMOOTHING_FACTOR;
+                        smoothY = smoothY * (1 - SMOOTHING_FACTOR) + rawY * SMOOTHING_FACTOR;
+                    }
 
+                    // 2. 處理捏合 (Pinch)
+                    processPinch(lm[8], thumb);
+
+                    // 3. 處理滑動 (Swipe) - 只有沒在捏合時才偵測滑動
+                    if (Date.now() - pinchStartTime > 200) { 
+                        processSwipe(smoothX, smoothY);
+                    }
                 } else {
-                    lastX = null; 
-                    lastY = null;
+                    // 手離開畫面，重置基準點，避免下次進入時亂跳
+                    refX = null; refY = null;
+                    resetPinchUI();
                 }
             }
             window.requestAnimationFrame(predictWebcam);
         }
 
-        // --- 6. 處理滑動 (切換焦點) ---
-        function handleSwipe(x, y) {
-            const now = Date.now();
-            if (now - lastActionTime < COOLDOWN_MS) return; // 冷卻中
+        // --- 邏輯：捏合 (長按確認) ---
+        function processPinch(p1, p2) {
+            const distance = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+            const bar = document.getElementById('pinch-bar');
 
-            if (lastX === null || lastY === null) {
-                lastX = x; lastY = y;
+            if (distance < PINCH_DISTANCE) {
+                if (pinchStartTime === 0) pinchStartTime = Date.now();
+                
+                // 計算進度
+                const elapsed = Date.now() - pinchStartTime;
+                const progress = Math.min((elapsed / PINCH_HOLD_TIME) * 100, 100);
+                bar.style.width = `${progress}%`;
+
+                if (elapsed > PINCH_HOLD_TIME) {
+                    // 觸發確認！
+                    triggerSelect();
+                    pinchStartTime = 0; // 重置
+                    bar.style.width = "0%";
+                    // 給一點冷卻，避免一次捏合觸發兩次
+                    lastActionTime = Date.now() + 500; 
+                }
+            } else {
+                resetPinchUI();
+            }
+        }
+
+        function resetPinchUI() {
+            pinchStartTime = 0;
+            document.getElementById('pinch-bar').style.width = "0%";
+        }
+
+        // --- 邏輯：滑動 (相對位移) ---
+        function processSwipe(x, y) {
+            const now = Date.now();
+            if (now - lastActionTime < COOLDOWN_MS) return;
+
+            // 初始化基準點
+            if (refX === null) { refX = x; refY = y; return; }
+
+            const dx = x - refX; // 位移量
+            const dy = y - refY;
+
+            // 判斷是否超過門檻
+            if (Math.abs(dx) > SWIPE_THRESHOLD || Math.abs(dy) > SWIPE_THRESHOLD) {
+                // 找出移動最多的軸向
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    // 左右移動 (鏡像: x變大是往左，x變小是往右)
+                    // 這裡的邏輯：dx > 0 代表原始畫面往左，鏡像後手看起來是往右 -> Next
+                    navigate(dx > 0 ? 1 : -1); 
+                } else {
+                    // 上下移動
+                    // dy > 0 代表往下
+                    navigate(dy > 0 ? 'down' : 'up');
+                }
+                
+                // 觸發後重置基準點，並進入冷卻
+                refX = x; refY = y;
+                lastActionTime = now;
+            }
+        }
+
+        // --- 導航控制器 (State Machine) ---
+        function navigate(direction) {
+            if (isInModal) {
+                // 彈窗模式：左右切換 (0:取消, 1:確認)
+                if (direction === 1 || direction === -1) {
+                    modalIndex = modalIndex === 0 ? 1 : 0;
+                    updateModalUI();
+                }
                 return;
             }
 
-            const dx = x - lastX;
-            const dy = y - lastY;
+            // 一般模式
+            let nextIndex = selectedIndex;
 
-            // X 軸移動 (左右)
-            if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
-                // 注意：鏡頭有做 ScaleX(-1) 視覺效果，但 MediaPipe 數據是原始的
-                // 原始數據 x 變大是往左 (如果是自拍鏡頭沒鏡像)，x 變小是往右
-                // 這裡我們直接用體感測試：
-                // dx > 0 (數值變大) -> 通常對應手往右移 (在鏡像畫面中) -> 下一個
-                // 這裡假設是標準 Webcam 行為，若方向相反請調換 logic
-                if (dx > 0) moveSelection(1);  // Right / Next
-                else moveSelection(-1);        // Left / Prev
-                
-                resetGestureState(now, x, y);
-            } 
-            // Y 軸移動 (上下)
-            else if (Math.abs(dy) > SWIPE_THRESHOLD) {
-                if (dy > 0) moveSelection(COLUMNS);  // Down (增加一列的索引)
-                else moveSelection(-COLUMNS);        // Up (減少一列的索引)
-
-                resetGestureState(now, x, y);
-            }
-        }
-
-        function resetGestureState(time, x, y) {
-            lastActionTime = time;
-            lastX = x;
-            lastY = y;
-        }
-
-        // --- 7. 處理捏合 (確認點餐) ---
-        function handlePinch(p1, p2) {
-            // 計算歐幾里得距離
-            const distance = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-            
-            if (distance < PINCH_THRESHOLD) {
-                if (!isPinching) { // 剛開始捏合
-                    const now = Date.now();
-                    // 加上一點冷卻時間，避免滑動剛結束就誤觸
-                    if (now - lastActionTime > 200) { 
-                        triggerClick();
-                        isPinching = true;
-                    }
+            if (typeof direction === 'string') {
+                // 上下
+                if (direction === 'down') {
+                    // 如果在一般菜單，往下跳一行
+                    if (selectedIndex < menuItemsData.length - COLUMNS) nextIndex += COLUMNS;
+                    // 如果在最後一行，往下跳到結帳鈕
+                    else if (selectedIndex < menuItemsData.length) nextIndex = CHECKOUT_INDEX;
+                } else if (direction === 'up') {
+                    // 如果在結帳鈕，往上跳回最後一個菜單項目
+                    if (selectedIndex === CHECKOUT_INDEX) nextIndex = menuItemsData.length - 1;
+                    // 普通往上
+                    else if (selectedIndex >= COLUMNS) nextIndex -= COLUMNS;
                 }
             } else {
-                isPinching = false; // 放開了
+                // 左右
+                nextIndex += direction;
+            }
+
+            // 邊界檢查
+            if (nextIndex < 0) nextIndex = 0;
+            if (nextIndex > CHECKOUT_INDEX) nextIndex = CHECKOUT_INDEX;
+
+            selectedIndex = nextIndex;
+            updateMenuUI();
+        }
+
+        // --- 觸發確認/點擊 ---
+        function triggerSelect() {
+            if (isInModal) {
+                // 彈窗內的確認邏輯
+                if (modalIndex === 1) { // 確認送單
+                    alert("✅ 訂單已送出！廚房準備中...");
+                    closeModal();
+                    // 重置頁面狀態
+                    selectedIndex = 0;
+                    updateMenuUI();
+                } else { // 取消
+                    closeModal();
+                }
+            } else {
+                // 一般頁面的點擊邏輯
+                if (selectedIndex === CHECKOUT_INDEX) {
+                    openModal();
+                } else {
+                    // 加入購物車
+                    const item = menuItemsData[selectedIndex];
+                    const feedback = document.getElementById('cart-feedback');
+                    feedback.innerText = `已加入：${item.name}`;
+                    feedback.style.opacity = 1;
+                    setTimeout(() => feedback.style.opacity = 0, 1000);
+                    
+                    // 視覺回饋
+                    const el = document.getElementById(`item-${selectedIndex}`);
+                    el.style.backgroundColor = "#d4edda";
+                    setTimeout(() => el.style.backgroundColor = "white", 300);
+                }
             }
         }
 
-        // --- 8. UI 更新邏輯 ---
-        function moveSelection(offset) {
-            // 移除舊的樣式
-            document.getElementById(`item-${selectedIndex}`).classList.remove('selected');
+        // --- UI 更新函式 ---
+        function updateMenuUI() {
+            // 清除所有選中
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('selected'));
+            document.getElementById('checkout-btn').classList.remove('selected');
 
-            // 計算新索引 (防止超出範圍)
-            let newIndex = selectedIndex + offset;
-            if (newIndex < 0) newIndex = 0;
-            if (newIndex >= menuItems.length) newIndex = menuItems.length - 1;
-            
-            selectedIndex = newIndex;
-
-            // 加上新樣式
-            const newItem = document.getElementById(`item-${selectedIndex}`);
-            newItem.classList.add('selected');
-            
-            // 讓畫面捲動到選中項目 (如果在可視範圍外)
-            newItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            if (selectedIndex === CHECKOUT_INDEX) {
+                const btn = document.getElementById('checkout-btn');
+                btn.classList.add('selected');
+                btn.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                const el = document.getElementById(`item-${selectedIndex}`);
+                if (el) {
+                    el.classList.add('selected');
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
         }
 
-        function triggerClick() {
-            const item = menuItems[selectedIndex];
-            
-            // 視覺回饋
-            cartFeedback.innerText = `已加入：${item.name} ${item.price}`;
-            cartFeedback.style.opacity = '1';
-            
-            // 模擬點擊效果
-            const domItem = document.getElementById(`item-${selectedIndex}`);
-            domItem.style.backgroundColor = "#d4edda";
-            setTimeout(() => {
-                domItem.style.backgroundColor = "white";
-                cartFeedback.style.opacity = '0';
-            }, 1000);
+        function openModal() {
+            isInModal = true;
+            modalIndex = 1; // 預設選確認
+            document.getElementById('confirm-modal').style.display = 'flex';
+            updateModalUI();
+        }
 
-            console.log(`Order placed: ${item.name}`);
+        function closeModal() {
+            isInModal = false;
+            document.getElementById('confirm-modal').style.display = 'none';
+        }
+
+        function updateModalUI() {
+            const btnCancel = document.getElementById('modal-cancel');
+            const btnConfirm = document.getElementById('modal-confirm');
+            
+            btnCancel.classList.remove('selected');
+            btnConfirm.classList.remove('selected');
+
+            if (modalIndex === 0) btnCancel.classList.add('selected');
+            else btnConfirm.classList.add('selected');
         }
 
     </script>
