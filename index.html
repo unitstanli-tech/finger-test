@@ -248,4 +248,216 @@
                     }
 
                     // E. 執行捏合邏輯
+                    processPinch(pinchDist);
+
+                } else {
+                    document.getElementById('virtual-cursor').style.display = 'none';
+                    clearHover();
+                }
+            }
+            window.requestAnimationFrame(predictWebcam);
+        }
+
+        // --- 核心：游標邏輯 (加入鎖定與磁吸) ---
+        function updateCursorPosition(rawX, rawY, locked) {
+            const cursor = document.getElementById('virtual-cursor');
+            const statusText = document.getElementById('status-text');
+
+            if (locked) {
+                // 鎖定模式：不更新座標，改變游標樣式
+                cursor.classList.add('locked');
+                statusText.innerText = "鎖定中";
                 
+                // --- 磁吸效果 (Magnet) ---
+                // 如果鎖定時底下有按鈕，將游標強行吸附到按鈕中心
+                if (hoveredElement) {
+                    const rect = hoveredElement.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    
+                    cursor.style.left = `${centerX}px`;
+                    cursor.style.top = `${centerY}px`;
+                    
+                    hoveredElement.classList.add('magnet-locked');
+                }
+                // 如果底下沒東西，游標就停在原地不動，方便用戶繼續捏合
+                return; 
+            }
+
+            // 非鎖定模式：正常更新
+            cursor.classList.remove('locked');
+            statusText.innerText = "Air Mouse";
+
+            let x = 1 - rawX; // 鏡像
+            let y = rawY;
+            x = (x - X_LIMIT_MIN) / (X_LIMIT_MAX - X_LIMIT_MIN);
+            y = (y - Y_LIMIT_MIN) / (Y_LIMIT_MAX - Y_LIMIT_MIN);
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+
+            smoothX = smoothX * (1 - SMOOTHING_FACTOR) + x * SMOOTHING_FACTOR;
+            smoothY = smoothY * (1 - SMOOTHING_FACTOR) + y * SMOOTHING_FACTOR;
+
+            cursor.style.display = 'block';
+            cursor.style.left = `${smoothX * window.innerWidth}px`;
+            cursor.style.top = `${smoothY * window.innerHeight}px`;
+        }
+
+        function checkHover() {
+            const cursor = document.getElementById('virtual-cursor');
+            const rect = cursor.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const el = document.elementFromPoint(centerX, centerY);
+
+            if (!el) return;
+            const interactiveEl = el.closest('.interactive');
+
+            if (interactiveEl !== hoveredElement) {
+                clearHover();
+                if (interactiveEl) {
+                    interactiveEl.classList.add('hovered');
+                    hoveredElement = interactiveEl;
+                }
+            }
+        }
+
+        function clearHover() {
+            if (hoveredElement) {
+                hoveredElement.classList.remove('hovered');
+                hoveredElement.classList.remove('magnet-locked');
+                hoveredElement = null;
+            }
+        }
+
+        // --- 捏合邏輯 ---
+        function processPinch(distance) {
+            const bar = document.getElementById('pinch-bar');
+
+            // 注意：這裡用的是較小的 CLICK 門檻來觸發進度條
+            if (distance < PINCH_CLICK_THRESHOLD) {
+                if (pinchTriggered) return; 
+
+                if (pinchStartTime === 0) pinchStartTime = Date.now();
+                
+                const elapsed = Date.now() - pinchStartTime;
+                const progress = Math.min((elapsed / PINCH_HOLD_TIME) * 100, 100);
+                bar.style.width = `${progress}%`;
+
+                if (elapsed > PINCH_HOLD_TIME) {
+                    triggerClick(); 
+                    pinchTriggered = true; 
+                    bar.style.width = "0%";
+                }
+            } else {
+                // 手指分開超過 LOCK 門檻才算完全重置
+                // 這樣可以避免手指在邊緣微抖造成的誤判
+                if (distance > PINCH_LOCK_THRESHOLD) {
+                    pinchTriggered = false; 
+                    pinchStartTime = 0;
+                    bar.style.width = "0%";
+                }
+            }
+        }
+
+        function triggerClick() {
+            if (!hoveredElement) return;
+            const id = hoveredElement.id;
+            
+            if (hoveredElement.classList.contains('menu-item')) {
+                addToCart(hoveredElement);
+            } 
+            else if (id === 'checkout-btn') {
+                if (Object.keys(cart).length === 0) alert("購物車是空的喔！");
+                else openModal();
+            }
+            else if (id === 'modal-cancel') {
+                document.getElementById('confirm-modal').style.display = 'none';
+            }
+            else if (id === 'modal-confirm') {
+                finishOrder();
+            }
+
+            hoveredElement.classList.add('active');
+            setTimeout(() => hoveredElement.classList.remove('active'), 200);
+        }
+
+        // --- 購物車與動畫 (與上版相同) ---
+        function addToCart(el) {
+            const id = el.id;
+            const name = el.dataset.name;
+            const price = parseInt(el.dataset.price);
+            const icon = el.dataset.icon;
+
+            if (!cart[id]) cart[id] = { name, price, icon, count: 0 };
+            cart[id].count++;
+
+            const badge = document.getElementById(`badge-${id}`);
+            badge.style.display = 'block';
+            badge.innerText = cart[id].count;
+            updateTotalCountDisplay();
+            createFlyingIcon(el, icon);
+        }
+
+        function createFlyingIcon(startEl, iconText) {
+            const startRect = startEl.getBoundingClientRect();
+            const endEl = document.getElementById('checkout-btn');
+            const endRect = endEl.getBoundingClientRect();
+
+            const flyer = document.createElement('div');
+            flyer.className = 'flying-item';
+            flyer.innerText = iconText;
+            flyer.style.left = `${startRect.left + startRect.width/2 - 20}px`;
+            flyer.style.top = `${startRect.top + startRect.height/2 - 20}px`;
+            document.body.appendChild(flyer);
+
+            const targetX = endRect.left + endRect.width/2 - 20;
+            const targetY = endRect.top + endRect.height/2 - 20;
+
+            requestAnimationFrame(() => {
+                flyer.style.transform = `translate(${targetX - parseFloat(flyer.style.left)}px, ${targetY - parseFloat(flyer.style.top)}px) scale(0.5)`;
+                flyer.style.opacity = '0';
+            });
+
+            setTimeout(() => {
+                flyer.remove();
+                endEl.style.transform = "scale(1.1)";
+                setTimeout(() => endEl.style.transform = "scale(1)", 100);
+            }, 600);
+        }
+
+        function updateTotalCountDisplay() {
+            const totalCount = Object.values(cart).reduce((sum, item) => sum + item.count, 0);
+            const countEl = document.getElementById('total-count');
+            countEl.style.display = totalCount > 0 ? 'inline-block' : 'none';
+            countEl.innerText = totalCount;
+        }
+
+        function openModal() {
+            const listContainer = document.getElementById('cart-list');
+            const totalDisplay = document.getElementById('cart-total-display');
+            listContainer.innerHTML = '';
+            let totalMoney = 0;
+            Object.values(cart).forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'cart-row';
+                row.innerHTML = `<span>${item.icon} ${item.name} x ${item.count}</span><span>$${item.price * item.count}</span>`;
+                listContainer.appendChild(row);
+                totalMoney += item.price * item.count;
+            });
+            totalDisplay.innerText = `總計: $${totalMoney}`;
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        function finishOrder() {
+            alert("✅ 感謝您的訂購！廚房已收到訂單。");
+            document.getElementById('confirm-modal').style.display = 'none';
+            cart = {};
+            document.querySelectorAll('.badge').forEach(b => { b.style.display = 'none'; b.innerText = '0'; });
+            updateTotalCountDisplay();
+            hoveredElement = null;
+            pinchTriggered = false;
+        }
+    </script>
+</body>
+</html>
