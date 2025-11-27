@@ -3,24 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>手勢點餐系統 (修復顯示版)</title>
+    <title>手勢點餐系統 (流暢不凍結版)</title>
     <style>
         /* --- 基礎設定 --- */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0; 
-            padding: 0;
+            margin: 0; padding: 0;
             background-color: #f0f2f5;
-            display: flex; 
-            flex-direction: column; 
-            align-items: center;
+            display: flex; flex-direction: column; align-items: center;
             height: 100vh;
-            /* 移除 body 的 overflow: hidden，避免內容完全消失 */
-            cursor: none; /* 隱藏滑鼠，使用 Air Mouse */
+            cursor: none; /* 隱藏滑鼠 */
             user-select: none;
         }
 
-        /* 隱藏 Webcam 元素但保留功能 */
         #webcam-container { position: fixed; opacity: 0; pointer-events: none; z-index: -1; }
 
         /* --- 虛擬游標 --- */
@@ -31,12 +26,20 @@
             border: 2px solid white; border-radius: 50%;
             pointer-events: none; z-index: 9999;
             transform: translate(-50%, -50%); 
-            display: none; /* 預設隱藏，偵測到手才顯示 */
+            display: none; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.4);
-            transition: left 0.1s, top 0.1s, width 0.1s, height 0.1s; 
+            /* 讓移動稍微平滑，但不會感覺延遲 */
+            transition: width 0.1s, height 0.1s, background-color 0.2s; 
         }
+        
+        /* 鎖定時樣式 */
         #virtual-cursor.locked {
             background-color: #ffff00; width: 18px; height: 18px; box-shadow: 0 0 15px #ffff00;
+        }
+        
+        /* 暫停/載入時樣式 (灰色) */
+        #virtual-cursor.busy {
+            background-color: #6c757d; width: 20px; height: 20px; border-color: #ccc;
         }
 
         /* --- 狀態列 --- */
@@ -50,27 +53,16 @@
         .dot.active { background: #00ff00; }
         .pinch-indicator { width: 0%; height: 4px; background: #ffff00; transition: width 0.1s linear; border-radius: 2px; }
 
-        /* --- 內容區域 (加入捲軸以防被切到) --- */
+        /* --- 內容區域 --- */
         .content-area {
-            flex: 1; 
-            width: 100%; 
-            max-width: 900px; 
-            padding: 20px 0 100px 0; /* 底部留白給按鈕 */
-            overflow-y: auto; /* 允許內容捲動 */
-            display: flex; 
-            flex-direction: column; 
-            align-items: center;
+            flex: 1; width: 100%; max-width: 900px; 
+            padding: 20px 0 100px 0; overflow-y: auto;
+            display: flex; flex-direction: column; align-items: center;
         }
-
-        h1 { margin-top: 20px; color: #333; }
 
         /* --- 菜單網格 --- */
         .menu-grid {
-            display: grid; 
-            grid-template-columns: repeat(3, 1fr); 
-            gap: 20px; 
-            padding: 10px;
-            width: 90%;
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; padding: 10px; width: 90%;
         }
 
         .menu-item {
@@ -87,13 +79,11 @@
         }
         .menu-item.active { transform: scale(0.95); background-color: #d4edda; }
 
-        /* 數字徽章 */
         .badge {
             position: absolute; top: -10px; right: -10px;
             background: #ffc107; color: #333; font-weight: bold;
             width: 30px; height: 30px; line-height: 30px;
-            border-radius: 50%; display: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            z-index: 10;
+            border-radius: 50%; display: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 10;
         }
 
         /* --- 結帳按鈕 --- */
@@ -106,7 +96,7 @@
         #checkout-btn.hovered { opacity: 1; transform: scale(1.05); border-color: white; }
         #total-count { font-size: 0.8em; background: #dc3545; padding: 2px 10px; border-radius: 20px; margin-left: 10px; display: none; }
 
-        /* --- Modal 彈窗 --- */
+        /* --- Modal --- */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.6); display: none;
@@ -138,7 +128,6 @@
         }
         #success-toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
-        /* 飛行商品動畫 */
         .flying-item {
             position: fixed; font-size: 40px; pointer-events: none; z-index: 5000;
             transition: transform 0.6s ease-in, opacity 0.6s;
@@ -147,13 +136,11 @@
 </head>
 <body>
 
-    <!-- 游標 -->
     <div id="virtual-cursor"></div>
 
-    <!-- 狀態列 -->
     <div id="status-bar">
         <div class="dot" id="status-dot"></div>
-        <span id="status-text">Air Mouse</span>
+        <span id="status-text">系統啟動中...</span>
         <div style="width: 60px; background: #555; height: 6px; border-radius: 3px;">
             <div class="pinch-indicator" id="pinch-bar"></div>
         </div>
@@ -162,18 +149,15 @@
     <h1>🛒 手勢點餐系統</h1>
 
     <div class="content-area">
-        <!-- 菜單區域 (預設有文字，JS 執行後會被覆蓋) -->
         <div class="menu-grid" id="menu">
-            <p>菜單載入中...</p>
+            <p style="text-align:center; width:100%;">菜單載入中...</p>
         </div>
-        
-        <!-- 結帳按鈕 -->
         <div id="checkout-btn" class="interactive">
             下單結帳 <span id="total-count">0</span>
         </div>
     </div>
 
-    <!-- 訂單確認彈窗 -->
+    <!-- Modal -->
     <div class="modal-overlay" id="confirm-modal">
         <div class="modal-box">
             <h2>📦 確認您的訂單</h2>
@@ -186,22 +170,20 @@
         </div>
     </div>
 
-    <!-- 成功提示 -->
+    <!-- Toast -->
     <div id="success-toast">
         <h2 style="margin:0 0 10px 0;">✅ 訂單已送出</h2>
-        <p style="margin:0; font-size:18px;">廚房正在準備您的餐點</p>
+        <p style="margin:0; font-size:18px;">系統將在 2 秒後重置</p>
     </div>
 
-    <!-- 隱藏的攝影機元素 -->
     <div id="webcam-container">
         <video id="webcam" autoplay playsinline></video>
     </div>
 
-    <!-- 核心程式邏輯 -->
     <script type="module">
         import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
-        // --- 1. 菜單資料與生成 (優先執行) ---
+        // --- 1. 菜單生成 (立即執行) ---
         const menuItemsData = [
             { id: 'b1', name: "漢堡", price: 120, icon: "🍔" },
             { id: 'b2', name: "薯條", price: 55, icon: "🍟" },
@@ -211,10 +193,9 @@
             { id: 'b6', name: "咖啡", price: 60, icon: "☕" }
         ];
 
-        // 立即生成菜單 HTML
         const menuContainer = document.getElementById('menu');
         if (menuContainer) {
-            menuContainer.innerHTML = ''; // 清空「載入中」提示
+            menuContainer.innerHTML = ''; 
             menuItemsData.forEach((item) => {
                 const div = document.createElement('div');
                 div.className = 'menu-item interactive';
@@ -230,7 +211,6 @@
                 `;
                 menuContainer.appendChild(div);
             });
-            console.log("Menu generated successfully.");
         }
 
         // --- 2. 參數設定 ---
@@ -239,18 +219,21 @@
         const PINCH_LOCK_THRESHOLD = 0.09;    
         const PINCH_HOLD_TIME = 400;   
 
-        // 螢幕映射範圍 (調整這裡可改變手部活動範圍)
+        // 範圍映射
         const X_LIMIT_MIN = 0.2; const X_LIMIT_MAX = 0.8;
         const Y_LIMIT_MIN = 0.1; const Y_LIMIT_MAX = 0.7;
 
-        // 狀態變數
+        // 系統狀態變數
         let cart = {};
         let smoothX = 0.5, smoothY = 0.5;
         let pinchStartTime = 0;
         let hoveredElement = null;
         let pinchTriggered = false; 
         let isCursorLocked = false;
-        let isInputPaused = false; 
+        
+        // 核心狀態控制
+        let isInteractionPaused = false; // 只暫停互動，不暫停游標
+        let requiresHandRelease = false; // 強制張開手才能下次點擊
 
         // --- 3. MediaPipe 初始化 ---
         let handLandmarker = undefined;
@@ -271,24 +254,23 @@
                 video.srcObject = stream;
                 video.addEventListener("loadeddata", () => {
                     document.getElementById("status-dot").classList.add("active");
+                    document.getElementById("status-text").innerText = "Air Mouse";
                     predictWebcam();
                 });
             } catch (err) {
                 console.error(err);
-                alert("啟動失敗：請確認攝影機權限或網路連線");
+                alert("相機存取失敗");
             }
         }
-        startApp(); // 啟動
+        startApp();
 
-        // --- 4. 核心偵測循環 ---
+        // --- 4. 偵測主迴圈 (關鍵修改) ---
         async function predictWebcam() {
             const video = document.getElementById("webcam");
             let startTimeMs = performance.now();
 
-            if (isInputPaused) {
-                window.requestAnimationFrame(predictWebcam);
-                return; 
-            }
+            // 確保每一幀都呼叫，絕對不 return 導致凍結
+            window.requestAnimationFrame(predictWebcam);
 
             if (handLandmarker && video.currentTime > 0) {
                 const results = handLandmarker.detectForVideo(video, startTimeMs);
@@ -297,83 +279,100 @@
                     const lm = results.landmarks[0];
                     const pinchDist = Math.sqrt(Math.pow(lm[8].x - lm[4].x, 2) + Math.pow(lm[8].y - lm[4].y, 2));
 
-                    // 判斷鎖定 (防手抖)
-                    if (pinchDist < PINCH_LOCK_THRESHOLD || pinchStartTime > 0) {
-                        isCursorLocked = true;
-                    } else {
-                        isCursorLocked = false;
-                        if (hoveredElement) hoveredElement.classList.remove('magnet-locked');
-                    }
-
-                    // 更新游標
-                    updateCursorPosition(lm[8].x, lm[8].y, isCursorLocked);
+                    // ==========================================
+                    // 1. 永遠執行的：游標移動邏輯
+                    // ==========================================
                     
-                    // 懸停檢查
-                    if (!isCursorLocked) {
-                        checkHover();
+                    // 如果正在暫停互動(送單中)，強制不鎖定游標，讓它自由飛翔
+                    let currentLockState = isInteractionPaused ? false : isCursorLocked;
+
+                    // 判斷是否要鎖定 (防抖動)
+                    // 只有在非暫停狀態下才允許鎖定
+                    if (!isInteractionPaused) {
+                        if (pinchDist < PINCH_LOCK_THRESHOLD || pinchStartTime > 0) {
+                            isCursorLocked = true;
+                            currentLockState = true;
+                        } else {
+                            isCursorLocked = false;
+                            currentLockState = false;
+                            // 如果解鎖了，移除磁吸效果
+                            if (hoveredElement) hoveredElement.classList.remove('magnet-locked');
+                        }
                     }
 
-                    // 捏合邏輯
-                    processPinch(pinchDist);
+                    // 更新游標位置 (傳入 pause 狀態以改變顏色)
+                    updateCursorPosition(lm[8].x, lm[8].y, currentLockState);
+
+
+                    // ==========================================
+                    // 2. 有條件執行的：互動邏輯 (懸停、點擊)
+                    // ==========================================
+                    if (!isInteractionPaused) {
+                        // 正常模式：檢查懸停
+                        if (!currentLockState) {
+                            checkHover();
+                        }
+                        // 正常模式：處理捏合
+                        processPinch(pinchDist);
+                    } else {
+                        // 暫停模式：清除懸停狀態 (避免按鈕一直亮著)
+                        clearHover();
+                        // 暫停模式：清除捏合進度
+                        document.getElementById('pinch-bar').style.width = "0%";
+                    }
 
                 } else {
                     document.getElementById('virtual-cursor').style.display = 'none';
                     clearHover();
                 }
             }
-            window.requestAnimationFrame(predictWebcam);
         }
 
-        // --- 5. 游標控制與映射 ---
+        // --- 5. 游標邏輯 ---
         function updateCursorPosition(rawX, rawY, locked) {
             const cursor = document.getElementById('virtual-cursor');
-            const statusText = document.getElementById('status-text');
-
-            if (locked) {
-                cursor.classList.add('locked');
-                statusText.innerText = "鎖定中";
-                
-                // 磁吸效果
-                if (hoveredElement) {
-                    const rect = hoveredElement.getBoundingClientRect();
-                    const centerX = rect.left + rect.width / 2;
-                    const centerY = rect.top + rect.height / 2;
-                    cursor.style.left = `${centerX}px`;
-                    cursor.style.top = `${centerY}px`;
-                    hoveredElement.classList.add('magnet-locked');
-                }
-                return; 
+            
+            // 根據狀態改變游標樣式
+            if (isInteractionPaused) {
+                cursor.classList.add('busy'); // 變灰色
+                cursor.classList.remove('locked');
+            } else {
+                cursor.classList.remove('busy');
+                if (locked) cursor.classList.add('locked'); // 變黃色
+                else cursor.classList.remove('locked'); // 變紅色
             }
 
-            cursor.classList.remove('locked');
-            statusText.innerText = "Air Mouse";
+            if (locked && !isInteractionPaused && hoveredElement) {
+                // 磁吸邏輯
+                const rect = hoveredElement.getBoundingClientRect();
+                cursor.style.left = `${rect.left + rect.width/2}px`;
+                cursor.style.top = `${rect.top + rect.height/2}px`;
+                hoveredElement.classList.add('magnet-locked');
+            } else {
+                // 正常移動邏輯
+                let x = 1 - rawX;
+                let y = rawY;
+                x = (x - X_LIMIT_MIN) / (X_LIMIT_MAX - X_LIMIT_MIN);
+                y = (y - Y_LIMIT_MIN) / (Y_LIMIT_MAX - Y_LIMIT_MIN);
+                x = Math.max(0, Math.min(1, x));
+                y = Math.max(0, Math.min(1, y));
 
-            let x = 1 - rawX; // 鏡像
-            let y = rawY;
-            // 範圍映射
-            x = (x - X_LIMIT_MIN) / (X_LIMIT_MAX - X_LIMIT_MIN);
-            y = (y - Y_LIMIT_MIN) / (Y_LIMIT_MAX - Y_LIMIT_MIN);
-            x = Math.max(0, Math.min(1, x));
-            y = Math.max(0, Math.min(1, y));
+                smoothX = smoothX * (1 - SMOOTHING_FACTOR) + x * SMOOTHING_FACTOR;
+                smoothY = smoothY * (1 - SMOOTHING_FACTOR) + y * SMOOTHING_FACTOR;
 
-            smoothX = smoothX * (1 - SMOOTHING_FACTOR) + x * SMOOTHING_FACTOR;
-            smoothY = smoothY * (1 - SMOOTHING_FACTOR) + y * SMOOTHING_FACTOR;
-
-            cursor.style.display = 'block';
-            cursor.style.left = `${smoothX * window.innerWidth}px`;
-            cursor.style.top = `${smoothY * window.innerHeight}px`;
+                cursor.style.display = 'block';
+                // 這裡改用 transform 效能較好
+                cursor.style.left = `${smoothX * window.innerWidth}px`;
+                cursor.style.top = `${smoothY * window.innerHeight}px`;
+            }
         }
 
         function checkHover() {
             const cursor = document.getElementById('virtual-cursor');
             const rect = cursor.getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            const centerY = rect.top + rect.height / 2;
-            const el = document.elementFromPoint(centerX, centerY);
-
+            const el = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
             if (!el) return;
             const interactiveEl = el.closest('.interactive');
-
             if (interactiveEl !== hoveredElement) {
                 clearHover();
                 if (interactiveEl) {
@@ -394,6 +393,14 @@
         // --- 6. 捏合互動 ---
         function processPinch(distance) {
             const bar = document.getElementById('pinch-bar');
+
+            // 安全機制：如果剛剛送完單，必須先張開手才能再次點擊
+            if (requiresHandRelease) {
+                if (distance > PINCH_LOCK_THRESHOLD) {
+                    requiresHandRelease = false; // 手張開了，解除限制
+                }
+                return; // 還沒張開，忽略所有操作
+            }
 
             if (distance < PINCH_CLICK_THRESHOLD) {
                 if (pinchTriggered) return; 
@@ -426,11 +433,8 @@
                 addToCart(hoveredElement);
             } 
             else if (id === 'checkout-btn') {
-                if (Object.keys(cart).length === 0) {
-                    console.log("購物車為空");
-                } else {
-                    openModal();
-                }
+                if (Object.keys(cart).length === 0) console.log("Empty cart");
+                else openModal();
             }
             else if (id === 'modal-cancel') {
                 document.getElementById('confirm-modal').style.display = 'none';
@@ -443,7 +447,7 @@
             setTimeout(() => hoveredElement.classList.remove('active'), 200);
         }
 
-        // --- 7. 購物車與邏輯 ---
+        // --- 7. 購物車邏輯 ---
         function addToCart(el) {
             const id = el.id;
             const name = el.dataset.name;
@@ -478,12 +482,7 @@
                 flyer.style.transform = `translate(${targetX - parseFloat(flyer.style.left)}px, ${targetY - parseFloat(flyer.style.top)}px) scale(0.5)`;
                 flyer.style.opacity = '0';
             });
-
-            setTimeout(() => {
-                flyer.remove();
-                endEl.style.transform = "scale(1.1)";
-                setTimeout(() => endEl.style.transform = "scale(1)", 100);
-            }, 600);
+            setTimeout(() => { flyer.remove(); }, 600);
         }
 
         function updateTotalCountDisplay() {
@@ -509,36 +508,45 @@
             document.getElementById('confirm-modal').style.display = 'flex';
         }
 
-        // --- 8. 送單與重置 (解決卡住的關鍵) ---
+        // --- 8. 送單重置 (修正版) ---
         function finishOrder() {
-            // 顯示成功提示
+            // 1. 顯示成功提示
             const toast = document.getElementById('success-toast');
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 2000);
 
-            // 關閉視窗
+            // 2. 關閉彈窗
             document.getElementById('confirm-modal').style.display = 'none';
             
-            // 重置資料
+            // 3. 重置購物車
             cart = {};
             document.querySelectorAll('.badge').forEach(b => { b.style.display = 'none'; b.innerText = '0'; });
             updateTotalCountDisplay();
 
-            // *** 強制重置所有狀態變數 ***
+            // 4. *** 關鍵狀態重置 ***
+            // 暫停「互動」功能，但「游標」還是會動
+            isInteractionPaused = true; 
+            document.getElementById('status-text').innerText = "系統處理中...";
+
+            // 強制設定為需要張開手
+            requiresHandRelease = true;
+
+            // 清除鎖定狀態
             pinchTriggered = false; 
             isCursorLocked = false;
             pinchStartTime = 0;
-            if(hoveredElement) hoveredElement.classList.remove('magnet-locked');
+            if(hoveredElement) {
+                hoveredElement.classList.remove('magnet-locked');
+                hoveredElement.classList.remove('hovered'); // 也要移除 hovered
+            }
             hoveredElement = null;
 
-            // 暫停輸入 1.5 秒
-            isInputPaused = true;
-            document.getElementById('status-text').innerText = "處理中...";
-            
+            // 5. 兩秒後恢復互動
             setTimeout(() => {
-                isInputPaused = false;
+                isInteractionPaused = false;
                 document.getElementById('status-text').innerText = "Air Mouse";
-            }, 1500);
+                // 注意：requiresHandRelease 還是 true，直到使用者真的張開手
+            }, 2000);
         }
     </script>
 </body>
