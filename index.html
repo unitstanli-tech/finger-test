@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>手勢懸停點餐 (Air Mouse)</title>
+    <title>手勢點餐系統 (完整體驗版)</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -15,36 +15,26 @@
             align-items: center;
             height: 100vh;
             overflow: hidden;
-            cursor: none; /* 隱藏電腦原本的滑鼠 */
+            cursor: none; /* 隱藏原生鼠標 */
             user-select: none;
         }
 
-        /* 隱藏 Webcam */
-        #webcam-container {
-            position: fixed; opacity: 0; pointer-events: none; z-index: -1;
-        }
+        /* 隱藏視訊源 */
+        #webcam-container { position: fixed; opacity: 0; pointer-events: none; z-index: -1; }
 
         /* --- 虛擬游標 --- */
         #virtual-cursor {
-            position: fixed;
-            width: 24px;
-            height: 24px;
+            position: fixed; width: 24px; height: 24px;
             background-color: rgba(255, 50, 50, 0.8);
-            border: 2px solid white;
-            border-radius: 50%;
-            pointer-events: none; /* 重要：讓點擊穿透，才能偵測下方的元素 */
-            z-index: 9999;
-            transform: translate(-50%, -50%);
-            display: none;
+            border: 2px solid white; border-radius: 50%;
+            pointer-events: none; z-index: 9999;
+            transform: translate(-50%, -50%); display: none;
             box-shadow: 0 4px 10px rgba(0,0,0,0.4);
-            transition: width 0.1s, height 0.1s, background-color 0.1s;
+            transition: width 0.1s, height 0.1s;
         }
-        
-        /* 捏合時的游標變化 */
         #virtual-cursor.pinching {
             background-color: #ffff00;
-            transform: translate(-50%, -50%) scale(0.8);
-            box-shadow: 0 0 15px #ffff00;
+            box-shadow: 0 0 15px #ffff00; transform: translate(-50%, -50%) scale(0.8);
         }
 
         /* 狀態列 */
@@ -65,41 +55,40 @@
         }
 
         .menu-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
-            padding: 10px;
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; padding: 10px;
         }
 
         .menu-item {
-            background: white; border-radius: 15px; padding: 20px;
+            background: white; border-radius: 15px; padding: 15px;
             text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            border: 3px solid transparent; transition: all 0.2s;
-            position: relative;
+            border: 3px solid transparent; transition: all 0.2s; position: relative;
         }
-
-        /* 懸停選中樣式 */
         .menu-item.hovered {
             border-color: #007bff; transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0,123,255,0.3);
-            background-color: #f8fbff;
+            box-shadow: 0 10px 20px rgba(0,123,255,0.3); background-color: #f8fbff;
         }
-        
-        /* 按下樣式 */
-        .menu-item.active {
-            transform: scale(0.95);
-            background-color: #d4edda;
+        .menu-item.active { transform: scale(0.95); background-color: #d4edda; }
+
+        /* 數字徽章 */
+        .badge {
+            position: absolute; top: -10px; right: -10px;
+            background: #ffc107; color: #333; font-weight: bold;
+            width: 30px; height: 30px; line-height: 30px;
+            border-radius: 50%; display: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
 
+        /* 結帳按鈕 */
         #checkout-btn {
-            margin: 30px auto; padding: 20px; width: 80%;
+            margin: 20px auto; padding: 20px; width: 80%;
             background: #28a745; color: white; text-align: center;
             border-radius: 12px; font-size: 22px; font-weight: bold;
-            border: 4px solid transparent; opacity: 0.9;
+            border: 4px solid transparent; opacity: 0.9; position: relative;
         }
         #checkout-btn.hovered {
             opacity: 1; transform: scale(1.05);
-            box-shadow: 0 0 0 4px #28a745, 0 10px 20px rgba(0,0,0,0.2);
-            border-color: white;
+            box-shadow: 0 0 0 4px #28a745, 0 10px 20px rgba(0,0,0,0.2); border-color: white;
         }
+        #total-count { font-size: 0.8em; background: #dc3545; padding: 2px 10px; border-radius: 20px; margin-left: 10px; display: none; }
 
         /* Modal */
         .modal-overlay {
@@ -109,19 +98,25 @@
         }
         .modal-box {
             background: white; padding: 30px; border-radius: 15px;
-            text-align: center; width: 320px;
+            text-align: center; width: 400px; max-height: 80vh; overflow-y: auto;
         }
         .modal-buttons { margin-top: 20px; display: flex; justify-content: space-around; }
         .btn { padding: 12px 24px; border-radius: 8px; border: none; font-size: 16px; min-width: 100px;}
         .btn-confirm { background: #007bff; color: white; }
         .btn-cancel { background: #e9ecef; color: #333; }
-        
         .btn.hovered { transform: scale(1.1); box-shadow: 0 0 0 3px #ffc107; }
 
-        #cart-feedback {
-            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: #333; color: white; padding: 12px 30px;
-            border-radius: 30px; opacity: 0; transition: opacity 0.3s; z-index: 3000;
+        /* 購物車列表樣式 */
+        #cart-list {
+            text-align: left; margin: 15px 0; border-top: 1px solid #eee; border-bottom: 1px solid #eee; padding: 10px 0;
+        }
+        .cart-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 18px; }
+        .cart-total { font-weight: bold; font-size: 20px; text-align: right; margin-top: 10px; color: #28a745; }
+
+        /* 飛行商品動畫 */
+        .flying-item {
+            position: fixed; font-size: 40px; pointer-events: none; z-index: 5000;
+            transition: transform 0.6s ease-in, opacity 0.6s;
         }
     </style>
 </head>
@@ -137,23 +132,27 @@
         </div>
     </div>
 
-    <h1>👆 指到哪，選到哪</h1>
+    <h1>🛒 手勢點餐</h1>
 
     <div class="content-area">
         <div class="menu-grid" id="menu"></div>
-        <!-- 結帳按鈕 -->
-        <div id="checkout-btn" class="interactive">🛒 下單結帳</div>
+        
+        <div id="checkout-btn" class="interactive">
+            下單結帳 <span id="total-count">0</span>
+        </div>
     </div>
 
-    <div id="cart-feedback">已加入</div>
-
-    <!-- 彈窗 -->
+    <!-- 結帳確認彈窗 -->
     <div class="modal-overlay" id="confirm-modal">
         <div class="modal-box">
-            <h2>確認送出訂單？</h2>
-            <p>請確認您的餐點無誤</p>
+            <h2>📦 確認您的訂單</h2>
+            <div id="cart-list">
+                <!-- JS 動態填入 -->
+            </div>
+            <div class="cart-total" id="cart-total-display">總計: $0</div>
+            
             <div class="modal-buttons">
-                <button class="btn btn-cancel interactive" id="modal-cancel">取消</button>
+                <button class="btn btn-cancel interactive" id="modal-cancel">繼續點餐</button>
                 <button class="btn btn-confirm interactive" id="modal-confirm">確認送單</button>
             </div>
         </div>
@@ -167,41 +166,53 @@
         import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
         // --- 參數設定 ---
-        const SMOOTHING_FACTOR = 0.15; // 游標平滑度 (越小越平滑但延遲越高)
-        const PINCH_DISTANCE = 0.05;   // 捏合觸發距離
-        const PINCH_HOLD_TIME = 400;   // 捏合確認時間 (毫秒)
+        const SMOOTHING_FACTOR = 0.15; 
+        const PINCH_DISTANCE = 0.05;   
+        const PINCH_HOLD_TIME = 400;   
         
-        // --- 視窗映射設定 (Motion Mapping) ---
-        // 我們不使用 0~1 的全範圍，而是取中間部分放大，讓手不用伸太長
-        const X_LIMIT_MIN = 0.2; // 左邊界 (切掉 20%)
-        const X_LIMIT_MAX = 0.8; // 右邊界 (切掉 20%)
-        const Y_LIMIT_MIN = 0.1; 
-        const Y_LIMIT_MAX = 0.7; // 下方多切一點，因為手通常舉不高
+        // 映射範圍 (Motion Mapping)
+        const X_LIMIT_MIN = 0.2; const X_LIMIT_MAX = 0.8;
+        const Y_LIMIT_MIN = 0.1; const Y_LIMIT_MAX = 0.7;
 
-        // --- 狀態變數 ---
-        let smoothX = 0.5;
-        let smoothY = 0.5;
+        // --- 全域變數 ---
+        let cart = {}; // 購物車: { "漢堡": {count: 2, price: 100, icon: "🍔"} }
+        
+        let smoothX = 0.5, smoothY = 0.5;
         let pinchStartTime = 0;
-        let hoveredElement = null; // 當前游標下的元素
+        let hoveredElement = null;
+        
+        // 關鍵修正：防止重複觸發的旗標
+        let pinchTriggered = false; 
 
+        // 菜單資料
         const menuItemsData = [
-            { name: "漢堡", icon: "🍔" }, { name: "薯條", icon: "🍟" }, { name: "可樂", icon: "🥤" },
-            { name: "炸雞", icon: "🍗" }, { name: "熱狗", icon: "🌭" }, { name: "咖啡", icon: "☕" },
-            { name: "披薩", icon: "🍕" }, { name: "三明治", icon: "🥪" }, { name: "壽司", icon: "🍣" }
+            { id: 'b1', name: "漢堡", price: 120, icon: "🍔" },
+            { id: 'b2', name: "薯條", price: 55, icon: "🍟" },
+            { id: 'b3', name: "可樂", price: 30, icon: "🥤" },
+            { id: 'b4', name: "炸雞", price: 80, icon: "🍗" },
+            { id: 'b5', name: "披薩", price: 90, icon: "🍕" },
+            { id: 'b6', name: "咖啡", price: 60, icon: "☕" }
         ];
 
-        // 初始化 UI
+        // --- 初始化 UI ---
         const menuContainer = document.getElementById('menu');
-        menuItemsData.forEach((item, index) => {
+        menuItemsData.forEach((item) => {
             const div = document.createElement('div');
-            div.className = 'menu-item interactive'; // 加上 interactive 標記方便偵測
-            div.id = `item-${index}`;
-            div.dataset.name = item.name; // 存資料方便讀取
-            div.innerHTML = `<h3>${item.icon}</h3><p>${item.name}</p>`;
+            div.className = 'menu-item interactive';
+            div.id = item.id;
+            div.dataset.name = item.name;
+            div.dataset.price = item.price;
+            div.dataset.icon = item.icon;
+            div.innerHTML = `
+                <div class="badge" id="badge-${item.id}">0</div>
+                <h3 style="font-size: 40px; margin: 0;">${item.icon}</h3>
+                <h3 style="margin: 5px 0;">${item.name}</h3>
+                <p style="color: #666;">$${item.price}</p>
+            `;
             menuContainer.appendChild(div);
         });
 
-        // 啟動 MediaPipe
+        // --- 啟動 MediaPipe ---
         let handLandmarker = undefined;
         async function startApp() {
             const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
@@ -226,6 +237,7 @@
         }
         startApp();
 
+        // --- 偵測循環 ---
         async function predictWebcam() {
             const video = document.getElementById("webcam");
             let startTimeMs = performance.now();
@@ -235,19 +247,12 @@
 
                 if (results.landmarks.length > 0) {
                     const lm = results.landmarks[0];
-                    const rawX = lm[8].x; // 食指
-                    const rawY = lm[8].y;
-                    const thumb = lm[4];  // 拇指
-
-                    // 1. 座標平滑化 & 映射 (核心改動)
-                    updateCursorPosition(rawX, rawY);
-
-                    // 2. 命中測試 (Hit Test) - 檢查游標下有什麼
+                    // 1. 更新游標位置
+                    updateCursorPosition(lm[8].x, lm[8].y);
+                    // 2. 懸停檢查
                     checkHover();
-
                     // 3. 捏合偵測
-                    processPinch(lm[8], thumb);
-
+                    processPinch(lm[8], lm[4]);
                 } else {
                     document.getElementById('virtual-cursor').style.display = 'none';
                     clearHover();
@@ -256,59 +261,39 @@
             window.requestAnimationFrame(predictWebcam);
         }
 
-        // --- 核心：游標位置映射 ---
+        // --- 核心：游標映射 ---
         function updateCursorPosition(rawX, rawY) {
-            // 水平翻轉 (鏡像)
-            let x = 1 - rawX; 
+            let x = 1 - rawX; // 鏡像
             let y = rawY;
-
-            // 映射範圍 (讓小動作可以覆蓋全螢幕)
-            // 公式：(數值 - 最小值) / (最大值 - 最小值) -> 歸一化到 0~1
+            // 範圍映射
             x = (x - X_LIMIT_MIN) / (X_LIMIT_MAX - X_LIMIT_MIN);
             y = (y - Y_LIMIT_MIN) / (Y_LIMIT_MAX - Y_LIMIT_MIN);
-
-            // 限制在 0 ~ 1 之間
             x = Math.max(0, Math.min(1, x));
             y = Math.max(0, Math.min(1, y));
 
-            // 平滑過濾
             smoothX = smoothX * (1 - SMOOTHING_FACTOR) + x * SMOOTHING_FACTOR;
             smoothY = smoothY * (1 - SMOOTHING_FACTOR) + y * SMOOTHING_FACTOR;
 
-            // 轉換成螢幕像素
             const cursor = document.getElementById('virtual-cursor');
-            const screenX = smoothX * window.innerWidth;
-            const screenY = smoothY * window.innerHeight;
-
             cursor.style.display = 'block';
-            cursor.style.left = `${screenX}px`;
-            cursor.style.top = `${screenY}px`;
+            cursor.style.left = `${smoothX * window.innerWidth}px`;
+            cursor.style.top = `${smoothY * window.innerHeight}px`;
         }
 
-        // --- 核心：懸停檢查 (Hit Test) ---
         function checkHover() {
             const cursor = document.getElementById('virtual-cursor');
             const rect = cursor.getBoundingClientRect();
-            
-            // 取得游標中心點
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
-
-            // 找出該座標下的 DOM 元素
-            // 為了避免選到游標自己，我們 CSS 有設 pointer-events: none
             const el = document.elementFromPoint(centerX, centerY);
 
             if (!el) return;
-
-            // 往上找是否有包含 interactive class 的元素 (例如 menu-item 或 button)
             const interactiveEl = el.closest('.interactive');
 
-            // 如果現在指到的跟之前不一樣
             if (interactiveEl !== hoveredElement) {
-                clearHover(); // 清除舊的
-                
+                clearHover();
                 if (interactiveEl) {
-                    interactiveEl.classList.add('hovered'); // 加入新的
+                    interactiveEl.classList.add('hovered');
                     hoveredElement = interactiveEl;
                 }
             }
@@ -321,64 +306,181 @@
             }
         }
 
-        // --- 捏合邏輯 (點擊) ---
+        // --- 捏合邏輯 (防重複觸發) ---
         function processPinch(p1, p2) {
             const distance = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
             const bar = document.getElementById('pinch-bar');
             const cursor = document.getElementById('virtual-cursor');
 
             if (distance < PINCH_DISTANCE) {
+                // 如果已經觸發過且手沒放開，就直接返回，不做任何事
+                if (pinchTriggered) return; 
+
                 if (pinchStartTime === 0) pinchStartTime = Date.now();
                 
                 cursor.classList.add('pinching');
-
                 const elapsed = Date.now() - pinchStartTime;
                 const progress = Math.min((elapsed / PINCH_HOLD_TIME) * 100, 100);
                 bar.style.width = `${progress}%`;
 
                 if (elapsed > PINCH_HOLD_TIME) {
-                    triggerClick(); // 觸發點擊
-                    pinchStartTime = 0; 
+                    triggerClick(); // 觸發動作
+                    
+                    // 設定已觸發旗標
+                    pinchTriggered = true; 
+                    
+                    // 重置 UI 但保留旗標，直到距離變大
                     bar.style.width = "0%";
-                    // 重置捏合狀態，防止連點，需要放開再捏
+                    cursor.classList.remove('pinching');
                 }
             } else {
+                // 手指分開了，重置旗標，允許下一次點擊
+                pinchTriggered = false; 
                 pinchStartTime = 0;
                 bar.style.width = "0%";
                 cursor.classList.remove('pinching');
             }
         }
 
-        // --- 觸發點擊動作 ---
+        // --- 點擊後的行為分流 ---
         function triggerClick() {
             if (!hoveredElement) return;
 
-            // 視覺回饋
-            hoveredElement.classList.add('active');
-            setTimeout(() => hoveredElement.classList.remove('active'), 200);
-
-            // 根據 ID 或 Class 判斷行為
             const id = hoveredElement.id;
             
-            if (id === 'checkout-btn') {
-                document.getElementById('confirm-modal').style.display = 'flex';
+            // 1. 點擊菜單項目
+            if (hoveredElement.classList.contains('menu-item')) {
+                addToCart(hoveredElement);
             } 
+            // 2. 點擊結帳按鈕
+            else if (id === 'checkout-btn') {
+                if (Object.keys(cart).length === 0) {
+                    alert("購物車是空的喔！");
+                } else {
+                    openModal();
+                }
+            }
+            // 3. 點擊 Modal 按鈕
             else if (id === 'modal-cancel') {
                 document.getElementById('confirm-modal').style.display = 'none';
-            } 
+            }
             else if (id === 'modal-confirm') {
-                alert("✅ 訂單已送出！");
-                document.getElementById('confirm-modal').style.display = 'none';
+                finishOrder();
             }
-            else if (hoveredElement.classList.contains('menu-item')) {
-                // 點到菜單
-                const name = hoveredElement.dataset.name;
-                const feedback = document.getElementById('cart-feedback');
-                feedback.innerText = `已加入：${name}`;
-                feedback.style.opacity = 1;
-                setTimeout(() => feedback.style.opacity = 0, 1000);
-            }
+
+            // 按鈕壓下效果
+            hoveredElement.classList.add('active');
+            setTimeout(() => hoveredElement.classList.remove('active'), 200);
         }
+
+        // --- 購物車邏輯 & 動畫 ---
+        function addToCart(el) {
+            const id = el.id;
+            const name = el.dataset.name;
+            const price = parseInt(el.dataset.price);
+            const icon = el.dataset.icon;
+
+            // 更新資料
+            if (!cart[id]) {
+                cart[id] = { name, price, icon, count: 0 };
+            }
+            cart[id].count++;
+
+            // 更新 UI (徽章與總數)
+            const badge = document.getElementById(`badge-${id}`);
+            badge.style.display = 'block';
+            badge.innerText = cart[id].count;
+            
+            updateTotalCountDisplay();
+
+            // 執行飛行動畫
+            createFlyingIcon(el, icon);
+        }
+
+        function createFlyingIcon(startEl, iconText) {
+            const startRect = startEl.getBoundingClientRect();
+            const endEl = document.getElementById('checkout-btn');
+            const endRect = endEl.getBoundingClientRect();
+
+            // 創建飛行元素
+            const flyer = document.createElement('div');
+            flyer.className = 'flying-item';
+            flyer.innerText = iconText;
+            flyer.style.left = `${startRect.left + startRect.width/2 - 20}px`;
+            flyer.style.top = `${startRect.top + startRect.height/2 - 20}px`;
+            document.body.appendChild(flyer);
+
+            // 計算目標位置
+            const targetX = endRect.left + endRect.width/2 - 20;
+            const targetY = endRect.top + endRect.height/2 - 20;
+
+            // 強制重繪以觸發動畫
+            requestAnimationFrame(() => {
+                flyer.style.transform = `translate(${targetX - parseFloat(flyer.style.left)}px, ${targetY - parseFloat(flyer.style.top)}px) scale(0.5)`;
+                flyer.style.opacity = '0';
+            });
+
+            // 動畫結束後移除
+            setTimeout(() => {
+                flyer.remove();
+                // 結帳按鈕抖動一下表示接收到了
+                endEl.style.transform = "scale(1.1)";
+                setTimeout(() => endEl.style.transform = "scale(1)", 100);
+            }, 600);
+        }
+
+        function updateTotalCountDisplay() {
+            const totalCount = Object.values(cart).reduce((sum, item) => sum + item.count, 0);
+            const countEl = document.getElementById('total-count');
+            countEl.style.display = totalCount > 0 ? 'inline-block' : 'none';
+            countEl.innerText = totalCount;
+        }
+
+        // --- Modal 與結帳 ---
+        function openModal() {
+            const listContainer = document.getElementById('cart-list');
+            const totalDisplay = document.getElementById('cart-total-display');
+            listContainer.innerHTML = '';
+
+            let totalMoney = 0;
+
+            Object.values(cart).forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'cart-row';
+                row.innerHTML = `
+                    <span>${item.icon} ${item.name} x ${item.count}</span>
+                    <span>$${item.price * item.count}</span>
+                `;
+                listContainer.appendChild(row);
+                totalMoney += item.price * item.count;
+            });
+
+            totalDisplay.innerText = `總計: $${totalMoney}`;
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        // --- 4. 系統重置 (完成送單) ---
+        function finishOrder() {
+            alert("✅ 感謝您的訂購！廚房已收到訂單。");
+            document.getElementById('confirm-modal').style.display = 'none';
+            
+            // 軟重置 (Soft Reset)
+            cart = {};
+            
+            // 清除畫面上所有徽章
+            document.querySelectorAll('.badge').forEach(b => {
+                b.style.display = 'none';
+                b.innerText = '0';
+            });
+            
+            // 更新總數顯示
+            updateTotalCountDisplay();
+            
+            // 確保游標狀態正常
+            hoveredElement = null;
+            pinchTriggered = false;
+        }
+
     </script>
 </body>
 </html>
