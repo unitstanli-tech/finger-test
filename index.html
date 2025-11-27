@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>手勢點餐系統 (含游標)</title>
+    <title>手勢懸停點餐 (Air Mouse)</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -15,39 +15,39 @@
             align-items: center;
             height: 100vh;
             overflow: hidden;
-            cursor: none; /* 隱藏滑鼠游標，改用我們自製的手勢游標 */
+            cursor: none; /* 隱藏電腦原本的滑鼠 */
+            user-select: none;
         }
 
-        /* 隱藏視訊源 */
+        /* 隱藏 Webcam */
         #webcam-container {
             position: fixed; opacity: 0; pointer-events: none; z-index: -1;
         }
 
-        /* --- 新增：虛擬游標樣式 --- */
+        /* --- 虛擬游標 --- */
         #virtual-cursor {
             position: fixed;
-            width: 30px;
-            height: 30px;
-            background-color: rgba(255, 0, 0, 0.6);
+            width: 24px;
+            height: 24px;
+            background-color: rgba(255, 50, 50, 0.8);
             border: 2px solid white;
             border-radius: 50%;
-            pointer-events: none; /* 讓點擊穿透，不會擋住下方元素 */
+            pointer-events: none; /* 重要：讓點擊穿透，才能偵測下方的元素 */
             z-index: 9999;
-            transform: translate(-50%, -50%); /* 讓座標位於圓心 */
-            display: none; /* 預設隱藏，偵測到手才顯示 */
-            transition: width 0.2s, height 0.2s, background-color 0.2s;
-            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            transform: translate(-50%, -50%);
+            display: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+            transition: width 0.1s, height 0.1s, background-color 0.1s;
         }
-
-        /* 捏合時的游標樣式 */
+        
+        /* 捏合時的游標變化 */
         #virtual-cursor.pinching {
-            width: 20px;
-            height: 20px;
-            background-color: #ffff00; /* 變成黃色 */
+            background-color: #ffff00;
+            transform: translate(-50%, -50%) scale(0.8);
             box-shadow: 0 0 15px #ffff00;
         }
 
-        /* 狀態指示器 */
+        /* 狀態列 */
         #status-bar {
             position: fixed; top: 10px; right: 10px;
             background: rgba(0,0,0,0.8); color: white;
@@ -56,100 +56,105 @@
         }
         .dot { width: 10px; height: 10px; background: red; border-radius: 50%; }
         .dot.active { background: #00ff00; }
-        .pinch-indicator {
-            width: 0%; height: 4px; background: #ffff00;
-            transition: width 0.1s linear; border-radius: 2px;
-        }
+        .pinch-indicator { width: 0%; height: 4px; background: #ffff00; transition: width 0.1s linear; border-radius: 2px; }
 
-        /* 菜單區域 */
+        /* 內容區 */
         .content-area {
-            flex: 1; width: 100%; max-width: 800px;
-            overflow-y: auto; padding-bottom: 100px;
-            /* 隱藏捲軸但保留功能 */
-            scrollbar-width: none; 
+            flex: 1; width: 100%; max-width: 900px;
+            display: flex; flex-direction: column; justify-content: center;
         }
-        .content-area::-webkit-scrollbar { display: none; }
 
         .menu-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
             padding: 10px;
         }
 
         .menu-item {
-            background: white; border-radius: 12px; padding: 15px;
-            text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            background: white; border-radius: 15px; padding: 20px;
+            text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
             border: 3px solid transparent; transition: all 0.2s;
+            position: relative;
         }
 
-        .menu-item.selected {
-            border-color: #007bff; transform: scale(1.05);
-            box-shadow: 0 8px 15px rgba(0,123,255,0.2);
+        /* 懸停選中樣式 */
+        .menu-item.hovered {
+            border-color: #007bff; transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,123,255,0.3);
+            background-color: #f8fbff;
         }
         
-        #checkout-btn {
-            margin: 20px auto; padding: 20px; width: 90%;
-            background: #28a745; color: white; text-align: center;
-            border-radius: 12px; font-size: 20px; font-weight: bold;
-            border: 4px solid transparent; opacity: 0.8;
+        /* 按下樣式 */
+        .menu-item.active {
+            transform: scale(0.95);
+            background-color: #d4edda;
         }
-        #checkout-btn.selected {
-            border-color: #fff; box-shadow: 0 0 0 4px #28a745, 0 10px 20px rgba(0,0,0,0.2);
-            opacity: 1; transform: scale(1.02);
+
+        #checkout-btn {
+            margin: 30px auto; padding: 20px; width: 80%;
+            background: #28a745; color: white; text-align: center;
+            border-radius: 12px; font-size: 22px; font-weight: bold;
+            border: 4px solid transparent; opacity: 0.9;
+        }
+        #checkout-btn.hovered {
+            opacity: 1; transform: scale(1.05);
+            box-shadow: 0 0 0 4px #28a745, 0 10px 20px rgba(0,0,0,0.2);
+            border-color: white;
         }
 
         /* Modal */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); display: none;
+            background: rgba(0,0,0,0.6); display: none;
             justify-content: center; align-items: center; z-index: 2000;
         }
         .modal-box {
             background: white; padding: 30px; border-radius: 15px;
-            text-align: center; width: 300px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            text-align: center; width: 320px;
         }
         .modal-buttons { margin-top: 20px; display: flex; justify-content: space-around; }
-        .btn { padding: 10px 20px; border-radius: 8px; border: none; font-size: 16px; }
+        .btn { padding: 12px 24px; border-radius: 8px; border: none; font-size: 16px; min-width: 100px;}
         .btn-confirm { background: #007bff; color: white; }
         .btn-cancel { background: #e9ecef; color: #333; }
-        .btn.selected { box-shadow: 0 0 0 3px #ffc107; transform: scale(1.1); }
+        
+        .btn.hovered { transform: scale(1.1); box-shadow: 0 0 0 3px #ffc107; }
 
         #cart-feedback {
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            background: #333; color: white; padding: 10px 20px;
-            border-radius: 30px; opacity: 0; transition: opacity 0.3s;
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: #333; color: white; padding: 12px 30px;
+            border-radius: 30px; opacity: 0; transition: opacity 0.3s; z-index: 3000;
         }
     </style>
 </head>
 <body>
 
-    <!-- 虛擬游標元件 -->
     <div id="virtual-cursor"></div>
 
     <div id="status-bar">
         <div class="dot" id="status-dot"></div>
-        <span>手勢偵測中</span>
-        <div style="width: 50px; background: #555; height: 4px; border-radius: 2px;">
+        <span>Air Mouse 模式</span>
+        <div style="width: 60px; background: #555; height: 6px; border-radius: 3px;">
             <div class="pinch-indicator" id="pinch-bar"></div>
         </div>
     </div>
 
-    <h1>🤏 隔空點餐 (游標版)</h1>
+    <h1>👆 指到哪，選到哪</h1>
 
     <div class="content-area">
         <div class="menu-grid" id="menu"></div>
-        <div id="checkout-btn">🛒 下單結帳</div>
+        <!-- 結帳按鈕 -->
+        <div id="checkout-btn" class="interactive">🛒 下單結帳</div>
     </div>
 
     <div id="cart-feedback">已加入</div>
 
+    <!-- 彈窗 -->
     <div class="modal-overlay" id="confirm-modal">
         <div class="modal-box">
             <h2>確認送出訂單？</h2>
-            <p>送出後廚房將開始製作</p>
+            <p>請確認您的餐點無誤</p>
             <div class="modal-buttons">
-                <button class="btn btn-cancel" id="modal-cancel">取消</button>
-                <button class="btn btn-confirm" id="modal-confirm">確認送單</button>
+                <button class="btn btn-cancel interactive" id="modal-cancel">取消</button>
+                <button class="btn btn-confirm interactive" id="modal-confirm">確認送單</button>
             </div>
         </div>
     </div>
@@ -161,47 +166,42 @@
     <script type="module">
         import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
-        // --- 設定參數 ---
-        const SWIPE_THRESHOLD = 0.08; 
-        const COOLDOWN_MS = 800; 
-        const PINCH_DISTANCE = 0.06;
-        const PINCH_HOLD_TIME = 600; 
-        const SMOOTHING_FACTOR = 0.2; 
-
-        let selectedIndex = 0;
-        let isInModal = false;
-        let modalIndex = 1; 
-        let lastActionTime = 0;
-        let pinchStartTime = 0;
+        // --- 參數設定 ---
+        const SMOOTHING_FACTOR = 0.15; // 游標平滑度 (越小越平滑但延遲越高)
+        const PINCH_DISTANCE = 0.05;   // 捏合觸發距離
+        const PINCH_HOLD_TIME = 400;   // 捏合確認時間 (毫秒)
         
-        // 平滑化座標
-        let smoothX = null;
-        let smoothY = null;
-        // 動作基準點
-        let refX = null; 
-        let refY = null;
+        // --- 視窗映射設定 (Motion Mapping) ---
+        // 我們不使用 0~1 的全範圍，而是取中間部分放大，讓手不用伸太長
+        const X_LIMIT_MIN = 0.2; // 左邊界 (切掉 20%)
+        const X_LIMIT_MAX = 0.8; // 右邊界 (切掉 20%)
+        const Y_LIMIT_MIN = 0.1; 
+        const Y_LIMIT_MAX = 0.7; // 下方多切一點，因為手通常舉不高
+
+        // --- 狀態變數 ---
+        let smoothX = 0.5;
+        let smoothY = 0.5;
+        let pinchStartTime = 0;
+        let hoveredElement = null; // 當前游標下的元素
 
         const menuItemsData = [
             { name: "漢堡", icon: "🍔" }, { name: "薯條", icon: "🍟" }, { name: "可樂", icon: "🥤" },
             { name: "炸雞", icon: "🍗" }, { name: "熱狗", icon: "🌭" }, { name: "咖啡", icon: "☕" },
-            { name: "冰淇淋", icon: "🍦" }, { name: "沙拉", icon: "🥗" }, { name: "披薩", icon: "🍕" }
+            { name: "披薩", icon: "🍕" }, { name: "三明治", icon: "🥪" }, { name: "壽司", icon: "🍣" }
         ];
-        const COLUMNS = 3;
-        const CHECKOUT_INDEX = menuItemsData.length;
 
-        // UI 初始化
+        // 初始化 UI
         const menuContainer = document.getElementById('menu');
-        const virtualCursor = document.getElementById('virtual-cursor');
-        
         menuItemsData.forEach((item, index) => {
             const div = document.createElement('div');
-            div.className = `menu-item ${index === 0 ? 'selected' : ''}`;
+            div.className = 'menu-item interactive'; // 加上 interactive 標記方便偵測
             div.id = `item-${index}`;
+            div.dataset.name = item.name; // 存資料方便讀取
             div.innerHTML = `<h3>${item.icon}</h3><p>${item.name}</p>`;
             menuContainer.appendChild(div);
         });
 
-        // MediaPipe 初始化
+        // 啟動 MediaPipe
         let handLandmarker = undefined;
         async function startApp() {
             const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
@@ -235,205 +235,149 @@
 
                 if (results.landmarks.length > 0) {
                     const lm = results.landmarks[0];
-                    const rawX = lm[8].x; 
-                    const rawY = lm[8].y; 
-                    const thumb = lm[4]; 
+                    const rawX = lm[8].x; // 食指
+                    const rawY = lm[8].y;
+                    const thumb = lm[4];  // 拇指
 
-                    // 1. 座標平滑化
-                    if (smoothX === null) { smoothX = rawX; smoothY = rawY; }
-                    else {
-                        smoothX = smoothX * (1 - SMOOTHING_FACTOR) + rawX * SMOOTHING_FACTOR;
-                        smoothY = smoothY * (1 - SMOOTHING_FACTOR) + rawY * SMOOTHING_FACTOR;
-                    }
+                    // 1. 座標平滑化 & 映射 (核心改動)
+                    updateCursorPosition(rawX, rawY);
 
-                    // 2. 更新虛擬游標 (關鍵改動)
-                    updateCursor(smoothX, smoothY);
+                    // 2. 命中測試 (Hit Test) - 檢查游標下有什麼
+                    checkHover();
 
-                    // 3. 處理捏合
+                    // 3. 捏合偵測
                     processPinch(lm[8], thumb);
 
-                    // 4. 處理滑動 (只有沒在捏合時才偵測)
-                    if (Date.now() - pinchStartTime > 200) { 
-                        processSwipe(smoothX, smoothY);
-                    }
                 } else {
-                    refX = null; refY = null;
-                    resetPinchUI();
-                    // 沒手的時候隱藏游標
-                    virtualCursor.style.display = 'none';
+                    document.getElementById('virtual-cursor').style.display = 'none';
+                    clearHover();
                 }
             }
             window.requestAnimationFrame(predictWebcam);
         }
 
-        // --- 更新游標位置 ---
-        function updateCursor(x, y) {
-            // MediaPipe 的 x=0 是畫面左邊，x=1 是右邊。
-            // 但因為我們看螢幕像照鏡子，所以：
-            // 當你的手往右移動，鏡頭(未鏡像)會看到手往右(x變大)，但為了讓游標跟手同方向，
-            // 螢幕上的游標應該也要往右。
-            // 計算：
-            // screenX = (1 - x) * 100vw  (水平翻轉，符合鏡像直覺)
-            // screenY = y * 100vh        (垂直不變)
-            
-            const screenX = (1 - x) * 100;
-            const screenY = y * 100;
+        // --- 核心：游標位置映射 ---
+        function updateCursorPosition(rawX, rawY) {
+            // 水平翻轉 (鏡像)
+            let x = 1 - rawX; 
+            let y = rawY;
 
-            virtualCursor.style.display = 'block';
-            virtualCursor.style.left = `${screenX}vw`;
-            virtualCursor.style.top = `${screenY}vh`;
+            // 映射範圍 (讓小動作可以覆蓋全螢幕)
+            // 公式：(數值 - 最小值) / (最大值 - 最小值) -> 歸一化到 0~1
+            x = (x - X_LIMIT_MIN) / (X_LIMIT_MAX - X_LIMIT_MIN);
+            y = (y - Y_LIMIT_MIN) / (Y_LIMIT_MAX - Y_LIMIT_MIN);
+
+            // 限制在 0 ~ 1 之間
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+
+            // 平滑過濾
+            smoothX = smoothX * (1 - SMOOTHING_FACTOR) + x * SMOOTHING_FACTOR;
+            smoothY = smoothY * (1 - SMOOTHING_FACTOR) + y * SMOOTHING_FACTOR;
+
+            // 轉換成螢幕像素
+            const cursor = document.getElementById('virtual-cursor');
+            const screenX = smoothX * window.innerWidth;
+            const screenY = smoothY * window.innerHeight;
+
+            cursor.style.display = 'block';
+            cursor.style.left = `${screenX}px`;
+            cursor.style.top = `${screenY}px`;
         }
 
+        // --- 核心：懸停檢查 (Hit Test) ---
+        function checkHover() {
+            const cursor = document.getElementById('virtual-cursor');
+            const rect = cursor.getBoundingClientRect();
+            
+            // 取得游標中心點
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            // 找出該座標下的 DOM 元素
+            // 為了避免選到游標自己，我們 CSS 有設 pointer-events: none
+            const el = document.elementFromPoint(centerX, centerY);
+
+            if (!el) return;
+
+            // 往上找是否有包含 interactive class 的元素 (例如 menu-item 或 button)
+            const interactiveEl = el.closest('.interactive');
+
+            // 如果現在指到的跟之前不一樣
+            if (interactiveEl !== hoveredElement) {
+                clearHover(); // 清除舊的
+                
+                if (interactiveEl) {
+                    interactiveEl.classList.add('hovered'); // 加入新的
+                    hoveredElement = interactiveEl;
+                }
+            }
+        }
+
+        function clearHover() {
+            if (hoveredElement) {
+                hoveredElement.classList.remove('hovered');
+                hoveredElement = null;
+            }
+        }
+
+        // --- 捏合邏輯 (點擊) ---
         function processPinch(p1, p2) {
             const distance = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
             const bar = document.getElementById('pinch-bar');
+            const cursor = document.getElementById('virtual-cursor');
 
             if (distance < PINCH_DISTANCE) {
                 if (pinchStartTime === 0) pinchStartTime = Date.now();
                 
-                // 游標捏合特效
-                virtualCursor.classList.add('pinching');
+                cursor.classList.add('pinching');
 
                 const elapsed = Date.now() - pinchStartTime;
                 const progress = Math.min((elapsed / PINCH_HOLD_TIME) * 100, 100);
                 bar.style.width = `${progress}%`;
 
                 if (elapsed > PINCH_HOLD_TIME) {
-                    triggerSelect();
+                    triggerClick(); // 觸發點擊
                     pinchStartTime = 0; 
                     bar.style.width = "0%";
-                    lastActionTime = Date.now() + 500; 
+                    // 重置捏合狀態，防止連點，需要放開再捏
                 }
             } else {
-                resetPinchUI();
+                pinchStartTime = 0;
+                bar.style.width = "0%";
+                cursor.classList.remove('pinching');
             }
         }
 
-        function resetPinchUI() {
-            pinchStartTime = 0;
-            document.getElementById('pinch-bar').style.width = "0%";
-            virtualCursor.classList.remove('pinching'); // 移除特效
-        }
+        // --- 觸發點擊動作 ---
+        function triggerClick() {
+            if (!hoveredElement) return;
 
-        function processSwipe(x, y) {
-            const now = Date.now();
-            if (now - lastActionTime < COOLDOWN_MS) return;
+            // 視覺回饋
+            hoveredElement.classList.add('active');
+            setTimeout(() => hoveredElement.classList.remove('active'), 200);
 
-            if (refX === null) { refX = x; refY = y; return; }
-
-            const dx = x - refX;
-            const dy = y - refY;
-
-            if (Math.abs(dx) > SWIPE_THRESHOLD || Math.abs(dy) > SWIPE_THRESHOLD) {
-                if (Math.abs(dx) > Math.abs(dy)) {
-                    // 水平翻轉修正：dx > 0 代表原始x變大(往右)，但我們做了鏡像
-                    // 實際上在鏡像畫面中，手往右(Cursor Right) = x變小 = dx < 0
-                    // 所以：
-                    // dx > 0 (原始往右/鏡像往左) -> Prev (-1)
-                    // dx < 0 (原始往左/鏡像往右) -> Next (1)
-                    // (但這取決於你的攝影機是否本身有鏡像，通常 WebCam 是未鏡像的)
-                    // 讓我們觀察游標：游標是 (1-x)。
-                    // 如果手往右 -> x 變小 -> (1-x) 變大 -> 游標往右。
-                    // 此時 dx (current - old) 是負數。
-                    // 所以 dx < 0 代表往右。
-                    navigate(dx < 0 ? 1 : -1); 
-                } else {
-                    navigate(dy > 0 ? 'down' : 'up');
-                }
-                
-                refX = x; refY = y;
-                lastActionTime = now;
+            // 根據 ID 或 Class 判斷行為
+            const id = hoveredElement.id;
+            
+            if (id === 'checkout-btn') {
+                document.getElementById('confirm-modal').style.display = 'flex';
+            } 
+            else if (id === 'modal-cancel') {
+                document.getElementById('confirm-modal').style.display = 'none';
+            } 
+            else if (id === 'modal-confirm') {
+                alert("✅ 訂單已送出！");
+                document.getElementById('confirm-modal').style.display = 'none';
             }
-        }
-
-        function navigate(direction) {
-            if (isInModal) {
-                if (direction === 1 || direction === -1) {
-                    modalIndex = modalIndex === 0 ? 1 : 0;
-                    updateModalUI();
-                }
-                return;
+            else if (hoveredElement.classList.contains('menu-item')) {
+                // 點到菜單
+                const name = hoveredElement.dataset.name;
+                const feedback = document.getElementById('cart-feedback');
+                feedback.innerText = `已加入：${name}`;
+                feedback.style.opacity = 1;
+                setTimeout(() => feedback.style.opacity = 0, 1000);
             }
-
-            let nextIndex = selectedIndex;
-            if (typeof direction === 'string') {
-                if (direction === 'down') {
-                    if (selectedIndex < menuItemsData.length - COLUMNS) nextIndex += COLUMNS;
-                    else if (selectedIndex < menuItemsData.length) nextIndex = CHECKOUT_INDEX;
-                } else if (direction === 'up') {
-                    if (selectedIndex === CHECKOUT_INDEX) nextIndex = menuItemsData.length - 1;
-                    else if (selectedIndex >= COLUMNS) nextIndex -= COLUMNS;
-                }
-            } else {
-                nextIndex += direction;
-            }
-
-            if (nextIndex < 0) nextIndex = 0;
-            if (nextIndex > CHECKOUT_INDEX) nextIndex = CHECKOUT_INDEX;
-
-            selectedIndex = nextIndex;
-            updateMenuUI();
-        }
-
-        function triggerSelect() {
-            if (isInModal) {
-                if (modalIndex === 1) { 
-                    alert("✅ 訂單已送出！");
-                    closeModal();
-                    selectedIndex = 0;
-                    updateMenuUI();
-                } else { closeModal(); }
-            } else {
-                if (selectedIndex === CHECKOUT_INDEX) {
-                    openModal();
-                } else {
-                    const item = menuItemsData[selectedIndex];
-                    const feedback = document.getElementById('cart-feedback');
-                    feedback.innerText = `已加入：${item.name}`;
-                    feedback.style.opacity = 1;
-                    setTimeout(() => feedback.style.opacity = 0, 1000);
-                    
-                    const el = document.getElementById(`item-${selectedIndex}`);
-                    el.style.backgroundColor = "#d4edda";
-                    setTimeout(() => el.style.backgroundColor = "white", 300);
-                }
-            }
-        }
-
-        function updateMenuUI() {
-            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('selected'));
-            document.getElementById('checkout-btn').classList.remove('selected');
-
-            if (selectedIndex === CHECKOUT_INDEX) {
-                const btn = document.getElementById('checkout-btn');
-                btn.classList.add('selected');
-                btn.scrollIntoView({ behavior: 'smooth' });
-            } else {
-                const el = document.getElementById(`item-${selectedIndex}`);
-                if (el) {
-                    el.classList.add('selected');
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }
-        }
-
-        function openModal() {
-            isInModal = true;
-            modalIndex = 1; 
-            document.getElementById('confirm-modal').style.display = 'flex';
-            updateModalUI();
-        }
-        function closeModal() {
-            isInModal = false;
-            document.getElementById('confirm-modal').style.display = 'none';
-        }
-        function updateModalUI() {
-            const btnCancel = document.getElementById('modal-cancel');
-            const btnConfirm = document.getElementById('modal-confirm');
-            btnCancel.classList.remove('selected');
-            btnConfirm.classList.remove('selected');
-            if (modalIndex === 0) btnCancel.classList.add('selected');
-            else btnConfirm.classList.add('selected');
         }
     </script>
 </body>
