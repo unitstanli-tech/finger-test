@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>抗手抖手勢點餐系統</title>
+    <title>手勢點餐 (無阻塞修正版)</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -16,7 +16,7 @@
 
         #webcam-container { position: fixed; opacity: 0; pointer-events: none; z-index: -1; }
 
-        /* 游標樣式 */
+        /* 游標 */
         #virtual-cursor {
             position: fixed; width: 24px; height: 24px;
             background-color: rgba(255, 50, 50, 0.8);
@@ -24,17 +24,12 @@
             pointer-events: none; z-index: 9999;
             transform: translate(-50%, -50%); display: none;
             box-shadow: 0 4px 10px rgba(0,0,0,0.4);
-            /* 加入 transition 讓磁吸效果更滑順 */
-            transition: left 0.1s, top 0.1s, width 0.1s, height 0.1s, background-color 0.2s; 
+            transition: left 0.1s, top 0.1s, width 0.1s, height 0.1s; 
         }
         #virtual-cursor.locked {
-            background-color: #ffff00;
-            border-color: #333;
-            width: 18px; height: 18px; /* 鎖定時稍微變小，更有瞄準感 */
-            box-shadow: 0 0 15px #ffff00;
+            background-color: #ffff00; width: 18px; height: 18px; box-shadow: 0 0 15px #ffff00;
         }
 
-        /* 狀態列 */
         #status-bar {
             position: fixed; top: 10px; right: 10px;
             background: rgba(0,0,0,0.8); color: white;
@@ -57,11 +52,8 @@
             border-color: #007bff; transform: translateY(-5px);
             box-shadow: 0 10px 20px rgba(0,123,255,0.3); background-color: #f8fbff;
         }
-        /* 磁吸時的強調樣式 */
         .menu-item.magnet-locked {
-            transform: scale(1.02);
-            border-color: #ffc107;
-            box-shadow: 0 0 0 4px rgba(255, 193, 7, 0.3);
+            transform: scale(1.02); border-color: #ffc107; box-shadow: 0 0 0 4px rgba(255, 193, 7, 0.3);
         }
         .menu-item.active { transform: scale(0.95); background-color: #d4edda; }
 
@@ -102,7 +94,21 @@
             position: fixed; font-size: 40px; pointer-events: none; z-index: 5000;
             transition: transform 0.6s ease-in, opacity 0.6s;
         }
-    </style>
+
+        /* --- 新增：成功提示框 (Toast) --- */
+        #success-toast {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.5);
+            background: rgba(40, 167, 69, 0.95); color: white;
+            padding: 30px 50px; border-radius: 20px;
+            text-align: center; z-index: 3000; pointer-events: none;
+            opacity: 0; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        #success-toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        #success-toast h2 { margin: 0 0 10px 0; font-size: 32px; }
+        #success-toast p { margin: 0; font-size: 18px; }
+
+    </script>
 </head>
 <body>
 
@@ -116,7 +122,7 @@
         </div>
     </div>
 
-    <h1>🛒 穩定的手勢點餐</h1>
+    <h1>🛒 穩定版手勢點餐</h1>
 
     <div class="content-area">
         <div class="menu-grid" id="menu"></div>
@@ -125,6 +131,7 @@
         </div>
     </div>
 
+    <!-- 訂單確認彈窗 -->
     <div class="modal-overlay" id="confirm-modal">
         <div class="modal-box">
             <h2>📦 確認您的訂單</h2>
@@ -137,6 +144,12 @@
         </div>
     </div>
 
+    <!-- 新增：成功提示 -->
+    <div id="success-toast">
+        <h2>✅ 訂單已送出</h2>
+        <p>廚房正在準備您的餐點</p>
+    </div>
+
     <div id="webcam-container">
         <video id="webcam" autoplay playsinline></video>
     </div>
@@ -144,14 +157,9 @@
     <script type="module">
         import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
-        // --- 核心參數 ---
         const SMOOTHING_FACTOR = 0.15; 
-        
-        // 1. 觸發點擊的距離 (真的捏到了)
         const PINCH_CLICK_THRESHOLD = 0.05;   
-        // 2. 鎖定游標的距離 (準備要捏了) -> 關鍵改動：比點擊距離大一點
         const PINCH_LOCK_THRESHOLD = 0.09;    
-        
         const PINCH_HOLD_TIME = 400;   
 
         // Motion Mapping
@@ -163,7 +171,10 @@
         let pinchStartTime = 0;
         let hoveredElement = null;
         let pinchTriggered = false; 
-        let isCursorLocked = false; // 新增：是否處於鎖定狀態
+        let isCursorLocked = false;
+        
+        // 新增：全域輸入暫停 (防止連點)
+        let isInputPaused = false;
 
         const menuItemsData = [
             { id: 'b1', name: "漢堡", price: 120, icon: "🍔" },
@@ -220,34 +231,32 @@
             const video = document.getElementById("webcam");
             let startTimeMs = performance.now();
 
+            // 如果系統暫停中 (例如正在顯示成功動畫)，就不執行任何手勢
+            if (isInputPaused) {
+                window.requestAnimationFrame(predictWebcam);
+                return; 
+            }
+
             if (handLandmarker && video.currentTime > 0) {
                 const results = handLandmarker.detectForVideo(video, startTimeMs);
 
                 if (results.landmarks.length > 0) {
                     const lm = results.landmarks[0];
-                    
-                    // A. 先計算捏合距離
                     const pinchDist = Math.sqrt(Math.pow(lm[8].x - lm[4].x, 2) + Math.pow(lm[8].y - lm[4].y, 2));
 
-                    // B. 判斷是否鎖定游標 (防手抖核心)
-                    // 如果距離小於 LOCK 門檻，或者已經在倒數計時中，就鎖定
                     if (pinchDist < PINCH_LOCK_THRESHOLD || pinchStartTime > 0) {
                         isCursorLocked = true;
                     } else {
                         isCursorLocked = false;
-                        // 解除鎖定時，移除磁吸樣式
                         if (hoveredElement) hoveredElement.classList.remove('magnet-locked');
                     }
 
-                    // C. 更新游標位置 (傳入是否鎖定的狀態)
                     updateCursorPosition(lm[8].x, lm[8].y, isCursorLocked);
                     
-                    // D. 懸停檢查 (如果鎖定了就不檢查新的，避免跳來跳去)
                     if (!isCursorLocked) {
                         checkHover();
                     }
 
-                    // E. 執行捏合邏輯
                     processPinch(pinchDist);
 
                 } else {
@@ -258,37 +267,29 @@
             window.requestAnimationFrame(predictWebcam);
         }
 
-        // --- 核心：游標邏輯 (加入鎖定與磁吸) ---
         function updateCursorPosition(rawX, rawY, locked) {
             const cursor = document.getElementById('virtual-cursor');
             const statusText = document.getElementById('status-text');
 
             if (locked) {
-                // 鎖定模式：不更新座標，改變游標樣式
                 cursor.classList.add('locked');
                 statusText.innerText = "鎖定中";
                 
-                // --- 磁吸效果 (Magnet) ---
-                // 如果鎖定時底下有按鈕，將游標強行吸附到按鈕中心
                 if (hoveredElement) {
                     const rect = hoveredElement.getBoundingClientRect();
                     const centerX = rect.left + rect.width / 2;
                     const centerY = rect.top + rect.height / 2;
-                    
                     cursor.style.left = `${centerX}px`;
                     cursor.style.top = `${centerY}px`;
-                    
                     hoveredElement.classList.add('magnet-locked');
                 }
-                // 如果底下沒東西，游標就停在原地不動，方便用戶繼續捏合
                 return; 
             }
 
-            // 非鎖定模式：正常更新
             cursor.classList.remove('locked');
             statusText.innerText = "Air Mouse";
 
-            let x = 1 - rawX; // 鏡像
+            let x = 1 - rawX;
             let y = rawY;
             x = (x - X_LIMIT_MIN) / (X_LIMIT_MAX - X_LIMIT_MIN);
             y = (y - Y_LIMIT_MIN) / (Y_LIMIT_MAX - Y_LIMIT_MIN);
@@ -330,11 +331,9 @@
             }
         }
 
-        // --- 捏合邏輯 ---
         function processPinch(distance) {
             const bar = document.getElementById('pinch-bar');
 
-            // 注意：這裡用的是較小的 CLICK 門檻來觸發進度條
             if (distance < PINCH_CLICK_THRESHOLD) {
                 if (pinchTriggered) return; 
 
@@ -350,8 +349,6 @@
                     bar.style.width = "0%";
                 }
             } else {
-                // 手指分開超過 LOCK 門檻才算完全重置
-                // 這樣可以避免手指在邊緣微抖造成的誤判
                 if (distance > PINCH_LOCK_THRESHOLD) {
                     pinchTriggered = false; 
                     pinchStartTime = 0;
@@ -382,7 +379,6 @@
             setTimeout(() => hoveredElement.classList.remove('active'), 200);
         }
 
-        // --- 購物車與動畫 (與上版相同) ---
         function addToCart(el) {
             const id = el.id;
             const name = el.dataset.name;
@@ -403,7 +399,6 @@
             const startRect = startEl.getBoundingClientRect();
             const endEl = document.getElementById('checkout-btn');
             const endRect = endEl.getBoundingClientRect();
-
             const flyer = document.createElement('div');
             flyer.className = 'flying-item';
             flyer.innerText = iconText;
@@ -449,14 +444,38 @@
             document.getElementById('confirm-modal').style.display = 'flex';
         }
 
+        // --- 修正後的送單邏輯 ---
         function finishOrder() {
-            alert("✅ 感謝您的訂購！廚房已收到訂單。");
+            // 1. 顯示自訂成功提示 (取代 alert)
+            const toast = document.getElementById('success-toast');
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+
+            // 2. 關閉彈窗
             document.getElementById('confirm-modal').style.display = 'none';
+            
+            // 3. 重置購物車資料與介面
             cart = {};
             document.querySelectorAll('.badge').forEach(b => { b.style.display = 'none'; b.innerText = '0'; });
             updateTotalCountDisplay();
+
+            // 4. *** 重要 ***：強制重置所有狀態變數
+            // 這是解決「卡住」的關鍵，把系統當作沒人操作過一樣重置
+            pinchTriggered = false; 
+            isCursorLocked = false;
+            pinchStartTime = 0;
+            if(hoveredElement) hoveredElement.classList.remove('magnet-locked');
             hoveredElement = null;
-            pinchTriggered = false;
+
+            // 5. 暫停輸入 1.5 秒
+            // 讓使用者的手有時間離開，防止動畫剛結束就誤觸
+            isInputPaused = true;
+            document.getElementById('status-text').innerText = "處理中...";
+            
+            setTimeout(() => {
+                isInputPaused = false;
+                document.getElementById('status-text').innerText = "Air Mouse";
+            }, 1500);
         }
     </script>
 </body>
